@@ -81,19 +81,18 @@ test "map get/set" {
 
 test "transform hierarchy basic" {
     const T = Transform(f32);
-    var root = T.identity();
-    var child = T.identity();
-    child.position = math.Vec(3, f32).init(.{ 1, 0, 0 });
-    // Use page allocator for test
     const gpa = std.testing.allocator;
-    try root.addChild(gpa, &child);
+    const root = try T.create(gpa);
+    defer root.destroy(gpa);
+    const child = try T.create(gpa);
+    defer child.destroy(gpa);
+    child.setPosition(math.Vec(3, f32).init(.{ 1, 0, 0 }));
+    try root.addChild(gpa, child);
     try std.testing.expectEqual(@as(usize, 1), root.getChildrenCount());
-    try std.testing.expect(child.getParent() == &root);
+    try std.testing.expect(child.getParent() == root);
     root.recalculateTransformMatricesDownward();
-    // After recalc, child's matrix should include translation
     _ = root.getMatrix();
     _ = child.getMatrix();
-    root.deinit(gpa);
 }
 
 test "mesh layout compile" {

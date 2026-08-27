@@ -36,7 +36,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
                 gl.programs.attach(prog_id, fs);
             }
             gl.programs.link(prog_id);
-            var ok: i32 = 0; gl.programs.getParameter(prog_id, .link_status, &ok);
+            var ok: i32 = 0; gl.programs.getParameter(prog_id, .link_status, @ptrCast(&ok));
             if (ok == 0) { var log: [512]u8 = undefined; _ = gl.programs.getInfoLog(prog_id, &log); }
             inline for (@typeInfo(Vert.Uniform).@"struct".fields) |field| {
                 const loc = gl.uniforms.location(prog_id, @ptrCast(field.name));

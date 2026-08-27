@@ -68,8 +68,9 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
     };
 
     return opaque {
-        inline fn impl(self: *@This()) *Impl { return @ptrCast(@alignCast(self)); }
-        inline fn implConst(self: *const @This()) *const Impl { return @ptrCast(@alignCast(self)); }
+        const Self = @This();
+        inline fn impl(self: *Self) *Impl { return @ptrCast(@alignCast(self)); }
+        inline fn implConst(self: *const Self) *const Impl { return @ptrCast(@alignCast(self)); }
 
         pub const IndexType = Index;
         pub const VertexType = Vertex;
@@ -80,18 +81,22 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
             const m = try allocator.create(Impl);
             m.* = .{};
             var vao: u32 = 0; var vbo: u32 = 0; var ebo: u32 = 0;
-            gl.vertex_arrays.gen(1, &vao);
-            gl.buffers.gen(1, &vbo);
-            gl.buffers.gen(1, &ebo);
+            if (gl.loader.loaded()) {
+                gl.vertex_arrays.gen(1, @ptrCast(&vao));
+                gl.buffers.gen(1, @ptrCast(&vbo));
+                gl.buffers.gen(1, @ptrCast(&ebo));
+            } else {
+                vao = 1; vbo = 2; ebo = 3;
+            }
             m.vao = vao; m.vbo = vbo; m.ebo = ebo; m.initialized = true;
             return @ptrCast(m);
         }
         pub fn init(allocator: std.mem.Allocator) !*@This() { return create(allocator); }
         pub fn destroy(self: *@This(), allocator: std.mem.Allocator) void {
             const m = self.impl();
-            if (m.ebo != 0) gl.buffers.delete(1, &m.ebo);
-            if (m.vbo != 0) gl.buffers.delete(1, &m.vbo);
-            if (m.vao != 0) gl.vertex_arrays.delete(1, &m.vao);
+            if (m.ebo != 0) gl.buffers.delete(1, @ptrCast(&m.ebo));
+            if (m.vbo != 0) gl.buffers.delete(1, @ptrCast(&m.vbo));
+            if (m.vao != 0) gl.vertex_arrays.delete(1, @ptrCast(&m.vao));
             allocator.destroy(m);
         }
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void { self.destroy(allocator); }
@@ -125,10 +130,10 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
             else gl.drawing.drawArraysInstanced(m.primitive, 0, @intCast(m.vertex_count), instance_count);
         }
 
-        pub fn edit(self: *@This()) Editor { return Editor.init(self); }
+        pub fn edit(self: *Self) Editor { return Editor.init(self); }
 
         pub const Editor = struct {
-            _mesh: *@This(),
+            _mesh: *Self,
             _pending_vertices: ?[]const Vertex = null,
             _pending_indices: ?[]const Index = null,
             _pending_vertex_buffer: ?u32 = null,
@@ -138,59 +143,64 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
             _pending_primitive: ?gl.drawing.PrimitiveType = null,
             _pending_divisors: ?[]const struct { index: u32, divisor: u32 } = null,
 
-            pub fn init(mesh: *@This()) Editor { return .{ ._mesh = mesh }; }
+            pub fn init(mesh: *Self) Editor { return .{ ._mesh = mesh }; }
 
-            pub fn setVertices(self: *Editor, vertices: []const Vertex) *Editor { self._pending_vertices = vertices; return self; }
-            pub fn setIndices(self: *Editor, indices: []const Index) *Editor { self._pending_indices = indices; return self; }
-            pub fn setVertexBuffer(self: *Editor, buffer_id: u32) *Editor { self._pending_vertex_buffer = buffer_id; return self; }
-            pub fn setIndexBuffer(self: *Editor, buffer_id: u32) *Editor { self._pending_index_buffer = buffer_id; return self; }
-            pub fn setVertexBufferTyped(self: *Editor, buffer: anytype) *Editor { self._pending_vertex_buffer = buffer.getId(); return self; }
-            pub fn setIndexBufferTyped(self: *Editor, buffer: anytype) *Editor { self._pending_index_buffer = buffer.getId(); return self; }
-            pub fn setVertexUsage(self: *Editor, usage: gl.buffers.BufferUsage) *Editor { self._pending_vertex_usage = usage; return self; }
-            pub fn setIndexUsage(self: *Editor, usage: gl.buffers.BufferUsage) *Editor { self._pending_index_usage = usage; return self; }
-            pub fn setPrimitive(self: *Editor, primitive: gl.drawing.PrimitiveType) *Editor { self._pending_primitive = primitive; return self; }
-            pub fn setDivisor(self: *Editor, attrib_index: u32, divisor: u32) *Editor { _ = attrib_index; _ = divisor; return self; }
-            pub fn setAttributeDivisors(self: *Editor, divisors: []const struct { index: u32, divisor: u32 }) *Editor { self._pending_divisors = divisors; return self; }
+            pub fn setVertices(self: *const Editor, vertices: []const Vertex) *const Editor { @constCast(self)._pending_vertices = vertices; return @constCast(self); }
+            pub fn setIndices(self: *const Editor, indices: []const Index) *const Editor { @constCast(self)._pending_indices = indices; return @constCast(self); }
+            pub fn setVertexBuffer(self: *const Editor, buffer_id: u32) *const Editor { @constCast(self)._pending_vertex_buffer = buffer_id; return @constCast(self); }
+            pub fn setIndexBuffer(self: *const Editor, buffer_id: u32) *const Editor { @constCast(self)._pending_index_buffer = buffer_id; return @constCast(self); }
+            pub fn setVertexBufferTyped(self: *const Editor, buffer: anytype) *const Editor { @constCast(self)._pending_vertex_buffer = buffer.getId(); return @constCast(self); }
+            pub fn setIndexBufferTyped(self: *const Editor, buffer: anytype) *const Editor { @constCast(self)._pending_index_buffer = buffer.getId(); return @constCast(self); }
+            pub fn setVertexUsage(self: *const Editor, usage: gl.buffers.BufferUsage) *const Editor { @constCast(self)._pending_vertex_usage = usage; return @constCast(self); }
+            pub fn setIndexUsage(self: *const Editor, usage: gl.buffers.BufferUsage) *const Editor { @constCast(self)._pending_index_usage = usage; return @constCast(self); }
+            pub fn setPrimitive(self: *const Editor, primitive: gl.drawing.PrimitiveType) *const Editor { @constCast(self)._pending_primitive = primitive; return @constCast(self); }
+            pub fn setDivisor(self: *const Editor, attrib_index: u32, divisor: u32) *const Editor { _ = attrib_index; _ = divisor; return @constCast(self); }
+            pub fn setAttributeDivisors(self: *const Editor, divisors: []const struct { index: u32, divisor: u32 }) *const Editor { @constCast(self)._pending_divisors = divisors; return @constCast(self); }
 
-            pub fn apply(self: *Editor) void {
-                const m = self._mesh.impl();
-                const v_usage = self._pending_vertex_usage orelse m.vertex_usage;
-                const i_usage = self._pending_index_usage orelse m.index_usage;
-                if (self._pending_primitive) |p| m.primitive = p;
-                if (self._pending_vertex_usage) |u| m.vertex_usage = u;
-                if (self._pending_index_usage) |u| m.index_usage = u;
-                gl.vertex_arrays.bind(m.vao);
-                if (self._pending_vertex_buffer) |vbo_id| {
-                    gl.buffers.bind(.array_buffer, vbo_id);
+            pub fn apply(self: *const Editor) void {
+                const m = @constCast(self)._mesh.impl();
+                const loaded = gl.loader.loaded();
+                const v_usage = @constCast(self)._pending_vertex_usage orelse m.vertex_usage;
+                const i_usage = @constCast(self)._pending_index_usage orelse m.index_usage;
+                if (@constCast(self)._pending_primitive) |p| m.primitive = p;
+                if (@constCast(self)._pending_vertex_usage) |u| m.vertex_usage = u;
+                if (@constCast(self)._pending_index_usage) |u| m.index_usage = u;
+                if (loaded) gl.vertex_arrays.bind(m.vao);
+                if (@constCast(self)._pending_vertex_buffer) |vbo_id| {
+                    if (loaded) gl.buffers.bind(.array_buffer, vbo_id);
                     m.vbo = vbo_id;
-                    if (self._pending_vertices) |verts| m.vertex_count = verts.len;
+                    if (@constCast(self)._pending_vertices) |verts| m.vertex_count = verts.len;
                     configureAttributes();
-                } else if (self._pending_vertices) |verts| {
-                    gl.buffers.bind(.array_buffer, m.vbo);
+                } else if (@constCast(self)._pending_vertices) |verts| {
+                    if (loaded) gl.buffers.bind(.array_buffer, m.vbo);
                     const bytes = std.mem.sliceAsBytes(verts);
-                    gl.buffers.bufferData(.array_buffer, bytes.len, bytes.ptr, v_usage);
+                    if (loaded) gl.buffers.bufferData(.array_buffer, bytes.len, bytes.ptr, v_usage);
                     m.vertex_count = verts.len;
                     configureAttributes();
                 }
-                if (self._pending_index_buffer) |ebo_id| {
-                    gl.buffers.bind(.element_array_buffer, ebo_id);
+                if (@constCast(self)._pending_index_buffer) |ebo_id| {
+                    if (loaded) gl.buffers.bind(.element_array_buffer, ebo_id);
                     m.ebo = ebo_id;
-                    if (self._pending_indices) |inds| m.index_count = inds.len;
-                } else if (self._pending_indices) |inds| {
-                    gl.buffers.bind(.element_array_buffer, m.ebo);
+                    if (@constCast(self)._pending_indices) |inds| m.index_count = inds.len;
+                } else if (@constCast(self)._pending_indices) |inds| {
+                    if (loaded) gl.buffers.bind(.element_array_buffer, m.ebo);
                     const bytes = std.mem.sliceAsBytes(inds);
-                    gl.buffers.bufferData(.element_array_buffer, bytes.len, bytes.ptr, i_usage);
+                    if (loaded) gl.buffers.bufferData(.element_array_buffer, bytes.len, bytes.ptr, i_usage);
                     m.index_count = inds.len;
                 }
-                if (self._pending_divisors) |divs| for (divs) |d| gl.vertex_attributes.divisor(d.index, d.divisor);
-                self.* = Editor.init(self._mesh);
+                if (@constCast(self)._pending_divisors) |divs| for (divs) |d| if (loaded) gl.vertex_attributes.divisor(d.index, d.divisor);
+                @constCast(self).* = Editor.init(@constCast(self)._mesh);
             }
             fn configureAttributes() void {
+                const loaded = gl.loader.loaded();
                 inline for (layout) |attr| {
-                    if (attr.is_integer) gl.vertex_attributes.iPointer(attr.index, attr.size, attr.gl_type, attr.stride, @ptrFromInt(attr.offset))
-                    else gl.vertex_attributes.pointer(attr.index, attr.size, attr.gl_type, attr.normalized, attr.stride, @ptrFromInt(attr.offset));
-                    gl.vertex_attributes.enable(attr.index);
-                    if (attr.divisor != 0) gl.vertex_attributes.divisor(attr.index, attr.divisor);
+                    if (attr.is_integer) {
+                        if (loaded) gl.vertex_attributes.iPointer(attr.index, attr.size, attr.gl_type, attr.stride, @ptrFromInt(attr.offset));
+                    } else if (loaded) {
+                        gl.vertex_attributes.pointer(attr.index, attr.size, attr.gl_type, attr.normalized, attr.stride, @ptrFromInt(attr.offset));
+                    }
+                    if (loaded) gl.vertex_attributes.enable(attr.index);
+                    if (attr.divisor != 0) if (loaded) gl.vertex_attributes.divisor(attr.index, attr.divisor);
                 }
             }
         };

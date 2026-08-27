@@ -29,9 +29,7 @@ pub const FragmentDescriptor = struct {
         defer gpa.free(path);
 
         const identifier_raw = node.name orelse return error.MissingName;
-        const dot = std.mem.lastIndexOfScalar(u8, identifier_raw, '.');
-        const baseName = if (dot) |d| identifier_raw[0..d] else identifier_raw;
-        const var_name = try text_utils.filenameToIdentifier(gpa, baseName);
+        const var_name = try text_utils.filenameToIdentifier(gpa, identifier_raw);
         defer gpa.free(var_name);
 
         const embed_path = try std.fmt.allocPrint(gpa, "{s}{s}", .{ data.path_to_root_node, path });
@@ -252,7 +250,7 @@ pub const FragmentDescriptor = struct {
         }
         try inner.appendSlice(gpa, "        _set_all: bool = false,\n\n");
         try inner.appendSlice(gpa, "        pub fn init(program: u32) Editor { return .{ ._program = program }; }\n");
-        try inner.appendSlice(gpa, "        pub fn setUniform(self: *Editor, uniform: Uniform) *Editor { self._pending = uniform; self._set_all = true; return self; }\n");
+        try inner.appendSlice(gpa, "        pub fn setUniform(self: *const Editor, uniform: Uniform) *const Editor { @constCast(self)._pending = uniform; @constCast(self)._set_all = true; return @constCast(self); }\n");
         for (uniforms) |u| {
             const zig_param_type: []u8 = blk: {
                 if (u.kind == .block) {
@@ -264,67 +262,59 @@ pub const FragmentDescriptor = struct {
                 else break :blk try common.mapGLSLTypeToZig(gpa, u.glsl_type);
             };
             defer gpa.free(zig_param_type);
-            const method_name = try std.fmt.allocPrint(gpa, "        pub fn set_{s}(self: *Editor, value: {s}) *Editor {{ self._pending.{s} = value; self._dirty.{s} = true; return self; }}\n", .{ u.name, zig_param_type, u.name, u.name });
+            const method_name = try std.fmt.allocPrint(gpa, "        pub fn set_{s}(self: *const Editor, value: {s}) *const Editor {{ @constCast(self)._pending.{s} = value; @constCast(self)._dirty.{s} = true; return @constCast(self); }}\n", .{ u.name, zig_param_type, u.name, u.name });
             defer gpa.free(method_name);
             try inner.appendSlice(gpa, method_name);
         }
         try inner.appendSlice(gpa, "\n");
-        try inner.appendSlice(gpa, "        pub fn apply(self: *Editor) void {\n");
-        try inner.appendSlice(gpa, "            const gl = @import(\"gl\");\n");
+        try inner.appendSlice(gpa, "        pub fn apply(self: *const Editor) void {\n");
+        try inner.appendSlice(gpa, "            const mut = @constCast(self);\n");
+        try inner.appendSlice(gpa, "            const gl = @import(\"gl_graphics\").gl;\n");
         try inner.appendSlice(gpa, "            inline for (@typeInfo(Uniform).@\"struct\".fields) |field| {\n");
         try inner.appendSlice(gpa, "                const name = field.name;\n");
         try inner.appendSlice(gpa, "                const is_dirty = if (self._set_all) true else @field(self._dirty, name);\n");
-        try inner.appendSlice(gpa, "                if (!is_dirty) continue;\n");
         try inner.appendSlice(gpa, "                const loc = gl.uniforms.location(self._program, @ptrCast(name));\n");
-        try inner.appendSlice(gpa, "                if (loc == -1) continue;\n");
+        try inner.appendSlice(gpa, "                if (is_dirty and loc != -1) {\n");
         try inner.appendSlice(gpa, "                const value = @field(self._pending, name);\n");
         try inner.appendSlice(gpa, "                const T = @TypeOf(value);\n");
         try inner.appendSlice(gpa, "                if (T == @import(\"gl_graphics\").Texture) {\n");
         try inner.appendSlice(gpa, "                    const unit: u32 = 0;\n");
-        try inner.appendSlice(gpa, "                    @import(\"gl\").textures.activeTexture(@enumFromInt(@intFromEnum(@import(\"gl\").textures.TextureUnit.texture0) + unit));\n");
-        try inner.appendSlice(gpa, "                    @import(\"gl\").textures.bind(.texture_2d, value.getId());\n");
+        try inner.appendSlice(gpa, "                    @import(\"gl_graphics\").gl.textures.activeTexture(@enumFromInt(@intFromEnum(@import(\"gl_graphics\").gl.textures.TextureUnit.texture0) + unit));\n");
+        try inner.appendSlice(gpa, "                    @import(\"gl_graphics\").gl.textures.bind(.texture_2d, value.getId());\n");
         try inner.appendSlice(gpa, "                    gl.uniforms.uniform1i(loc, @intCast(unit));\n");
-        try inner.appendSlice(gpa, "                } else if (@hasDecl(T, \"len\") and @hasDecl(T, \"value_type\")) {\n");
+        try inner.appendSlice(gpa, "                } else if (@typeInfo(T) == .@\"struct\" and @hasDecl(T, \"len\") and @hasDecl(T, \"value_type\")) {\n");
         try inner.appendSlice(gpa, "                    if (T.value_type == f32) {\n");
-        try inner.appendSlice(gpa, "                        if (T.len == 1) gl.uniforms.uniform1f(loc, value.v[0])\n");
-        try inner.appendSlice(gpa, "                        else if (T.len == 2) gl.uniforms.uniform2f(loc, value.v[0], value.v[1])\n");
-        try inner.appendSlice(gpa, "                        else if (T.len == 3) gl.uniforms.uniform3f(loc, value.v[0], value.v[1], value.v[2])\n");
-        try inner.appendSlice(gpa, "                        else if (T.len == 4) gl.uniforms.uniform4f(loc, value.v[0], value.v[1], value.v[2], value.v[3])\n");
+        try inner.appendSlice(gpa, "                        if (T.len == 1) gl.uniforms.uniform1f(loc, value.v[0]) else if (T.len == 2) gl.uniforms.uniform2f(loc, value.v[0], value.v[1]) else if (T.len == 3) gl.uniforms.uniform3f(loc, value.v[0], value.v[1], value.v[2]) else if (T.len == 4) gl.uniforms.uniform4f(loc, value.v[0], value.v[1], value.v[2], value.v[3]) else {}\n");
         try inner.appendSlice(gpa, "                    } else if (T.value_type == i32) {\n");
-        try inner.appendSlice(gpa, "                        if (T.len == 1) gl.uniforms.uniform1i(loc, value.v[0])\n");
-        try inner.appendSlice(gpa, "                        else if (T.len == 2) gl.uniforms.uniform2i(loc, value.v[0], value.v[1])\n");
-        try inner.appendSlice(gpa, "                        else if (T.len == 3) gl.uniforms.uniform3i(loc, value.v[0], value.v[1], value.v[2])\n");
-        try inner.appendSlice(gpa, "                        else if (T.len == 4) gl.uniforms.uniform4i(loc, value.v[0], value.v[1], value.v[2], value.v[3])\n");
+        try inner.appendSlice(gpa, "                        if (T.len == 1) gl.uniforms.uniform1i(loc, value.v[0]) else if (T.len == 2) gl.uniforms.uniform2i(loc, value.v[0], value.v[1]) else if (T.len == 3) gl.uniforms.uniform3i(loc, value.v[0], value.v[1], value.v[2]) else if (T.len == 4) gl.uniforms.uniform4i(loc, value.v[0], value.v[1], value.v[2], value.v[3]) else {}\n");
         try inner.appendSlice(gpa, "                    } else if (T.value_type == u32) {\n");
-        try inner.appendSlice(gpa, "                        if (T.len == 1) gl.uniforms.uniform1ui(loc, value.v[0])\n");
-        try inner.appendSlice(gpa, "                        else if (T.len == 2) gl.uniforms.uniform2ui(loc, value.v[0], value.v[1])\n");
-        try inner.appendSlice(gpa, "                        else if (T.len == 3) gl.uniforms.uniform3ui(loc, value.v[0], value.v[1], value.v[2])\n");
-        try inner.appendSlice(gpa, "                        else if (T.len == 4) gl.uniforms.uniform4ui(loc, value.v[0], value.v[1], value.v[2], value.v[3])\n");
+        try inner.appendSlice(gpa, "                        if (T.len == 1) gl.uniforms.uniform1ui(loc, value.v[0]) else if (T.len == 2) gl.uniforms.uniform2ui(loc, value.v[0], value.v[1]) else if (T.len == 3) gl.uniforms.uniform3ui(loc, value.v[0], value.v[1], value.v[2]) else if (T.len == 4) gl.uniforms.uniform4ui(loc, value.v[0], value.v[1], value.v[2], value.v[3]) else {}\n");
         try inner.appendSlice(gpa, "                    }\n");
-        try inner.appendSlice(gpa, "                } else if (@hasDecl(T, \"cols\") and @hasDecl(T, \"rows\")) {\n");
-        try inner.appendSlice(gpa, "                    if (T.cols == 4 and T.rows == 4) { const data: [16]f32 = @bitCast(value); gl.uniforms.uniformMatrix4fv(loc, false, &data); }\n");
-        try inner.appendSlice(gpa, "                    else if (T.cols == 3 and T.rows == 3) { const data: [9]f32 = @bitCast(value); gl.uniforms.uniformMatrix3fv(loc, false, &data); }\n");
-        try inner.appendSlice(gpa, "                    else if (T.cols == 2 and T.rows == 2) { const data: [4]f32 = @bitCast(value); gl.uniforms.uniformMatrix2fv(loc, false, &data); }\n");
-        try inner.appendSlice(gpa, "                } else if (T == f32) gl.uniforms.uniform1f(loc, value) else if (T == i32) gl.uniforms.uniform1i(loc, value) else if (T == u32) gl.uniforms.uniform1ui(loc, value) else if (T == bool) gl.uniforms.uniform1i(loc, if (value) 1 else 0) else { _ = value; _ = loc; }\n");
+        try inner.appendSlice(gpa, "                } else if (@typeInfo(T) == .@\"struct\" and @hasDecl(T, \"cols\") and @hasDecl(T, \"rows\")) {\n");
+        try inner.appendSlice(gpa, "                    if (T.cols == 4 and T.rows == 4) { var data: [16]f32 = undefined; inline for (0..4) |c| { inline for (0..4) |r| { data[c * 4 + r] = value.data[c].v[r]; } } gl.uniforms.uniformMatrix4fv(loc, false, &data); }\n");
+        try inner.appendSlice(gpa, "                    else if (T.cols == 3 and T.rows == 3) { var data: [9]f32 = undefined; inline for (0..3) |c| { inline for (0..3) |r| { data[c * 3 + r] = value.data[c].v[r]; } } gl.uniforms.uniformMatrix3fv(loc, false, &data); }\n");
+        try inner.appendSlice(gpa, "                    else if (T.cols == 2 and T.rows == 2) { var data: [4]f32 = undefined; inline for (0..2) |c| { inline for (0..2) |r| { data[c * 2 + r] = value.data[c].v[r]; } } gl.uniforms.uniformMatrix2fv(loc, false, &data); }\n");
+        try inner.appendSlice(gpa, "                } else if (T == f32) gl.uniforms.uniform1f(loc, value) else if (T == i32) gl.uniforms.uniform1i(loc, value) else if (T == u32) gl.uniforms.uniform1ui(loc, value) else if (T == bool) gl.uniforms.uniform1i(loc, if (value) 1 else 0) else {}\n");
+        try inner.appendSlice(gpa, "                }\n");
         try inner.appendSlice(gpa, "            }\n");
-        try inner.appendSlice(gpa, "            self._set_all = false;\n");
-        try inner.appendSlice(gpa, "            inline for (@typeInfo(@TypeOf(self._dirty)).@\"struct\".fields) |f| @field(self._dirty, f.name) = false;\n");
+        try inner.appendSlice(gpa, "            mut._set_all = false;\n");
+        try inner.appendSlice(gpa, "            inline for (@typeInfo(@TypeOf(mut._dirty)).@\"struct\".fields) |f| @field(mut._dirty, f.name) = false;\n");
         try inner.appendSlice(gpa, "        }\n");
         try inner.appendSlice(gpa, "    };\n\n");
 
         try inner.appendSlice(gpa, "    pub fn instance() u32 {\n");
         try inner.appendSlice(gpa, "        if (_initialized and id != 0) return id;\n");
-        try inner.appendSlice(gpa, "        const gl = @import(\"gl\");\n");
+        try inner.appendSlice(gpa, "        const gl = @import(\"gl_graphics\").gl;\n");
         try inner.appendSlice(gpa, "        const src = @embedFile(\"");
         try inner.appendSlice(gpa, embed_path);
         try inner.appendSlice(gpa, "\");\n");
         try inner.appendSlice(gpa, "        const shader = gl.shaders.create(.fragment_shader);\n");
         try inner.appendSlice(gpa, "        gl.shaders.source(shader, src);\n");
         try inner.appendSlice(gpa, "        gl.shaders.compile(shader);\n");
-        try inner.appendSlice(gpa, "        var ok: i32 = 0; gl.shaders.getParameter(shader, .compile_status, &ok);\n");
+        try inner.appendSlice(gpa, "        var ok: i32 = 0; gl.shaders.getParameter(shader, .compile_status, @ptrCast(&ok));\n");
         try inner.appendSlice(gpa, "        id = shader; _initialized = true; return id;\n");
         try inner.appendSlice(gpa, "    }\n\n");
-        try inner.appendSlice(gpa, "    pub fn dispose() void { if (id != 0) { @import(\"gl\").shaders.delete(id); id = 0; _initialized = false; } }\n\n");
+        try inner.appendSlice(gpa, "    pub fn dispose() void { if (id != 0) { @import(\"gl_graphics\").gl.shaders.delete(id); id = 0; _initialized = false; } }\n\n");
         try inner.appendSlice(gpa, "    pub fn edit(program: u32) Editor { return Editor.init(program); }\n");
 
         const inner_slice = try inner.toOwnedSlice(gpa);

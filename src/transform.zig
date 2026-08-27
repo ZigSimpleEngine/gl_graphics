@@ -26,10 +26,10 @@ pub fn Transform(comptime scalar_type_: type) type {
             m.* = .{};
             return @ptrCast(m);
         }
-        pub fn init(allocator: std.mem.Allocator, position: Vec3, rotation: QuatT, scale: Vec3) !*Self {
+        pub fn init(allocator: std.mem.Allocator, pos: Vec3, rot: QuatT, sc: Vec3) !*Self {
             const self = try create(allocator);
             const m = self.impl();
-            m.position = position; m.rotation = rotation; m.scale = scale;
+            m.position = pos; m.rotation = rot; m.scale = sc;
             self.recalculateTransformMatrix();
             return self;
         }
@@ -42,12 +42,9 @@ pub fn Transform(comptime scalar_type_: type) type {
         }
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void { self.destroy(allocator); }
 
-        pub fn getPosition(self: *const Self) Vec3 { return self.implConst().position; }
-        pub fn setPosition(self: *Self, v: Vec3) void { self.impl().position = v; }
-        pub fn getRotation(self: *const Self) QuatT { return self.implConst().rotation; }
-        pub fn setRotation(self: *Self, q: QuatT) void { self.impl().rotation = q; }
-        pub fn getScale(self: *const Self) Vec3 { return self.implConst().scale; }
-        pub fn setScale(self: *Self, v: Vec3) void { self.impl().scale = v; }
+        pub fn position(self: *Self) *Vec3 { return &self.impl().position; }
+        pub fn rotation(self: *Self) *QuatT { return &self.impl().rotation; }
+        pub fn scale(self: *Self) *Vec3 { return &self.impl().scale; }
         pub fn getMatrix(self: *const Self) Mat4 { return self.implConst().matrix; }
 
         pub fn getChild(self: *const Self, id: usize) ?*Self {

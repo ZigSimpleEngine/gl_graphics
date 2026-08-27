@@ -26,10 +26,18 @@ pub const UniformDef = struct {
     is_buffer: bool = false, // true if block -> UBO
 };
 
-pub fn isWhitespace(c: u8) bool { return c == ' ' or c == '\t' or c == '\r' or c == '\n'; }
-pub fn isAlpha(c: u8) bool { return (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or c == '_'; }
-pub fn isAlnum(c: u8) bool { return isAlpha(c) or (c >= '0' and c <= '9'); }
-pub fn isDigit(c: u8) bool { return c >= '0' and c <= '9'; }
+pub fn isWhitespace(c: u8) bool {
+    return c == ' ' or c == '\t' or c == '\r' or c == '\n';
+}
+pub fn isAlpha(c: u8) bool {
+    return (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or c == '_';
+}
+pub fn isAlnum(c: u8) bool {
+    return isAlpha(c) or (c >= '0' and c <= '9');
+}
+pub fn isDigit(c: u8) bool {
+    return c >= '0' and c <= '9';
+}
 
 pub fn skipSpaces(s: []const u8, i: usize) usize {
     var j = i;
@@ -63,7 +71,7 @@ pub fn stripLayouts(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
     defer out.deinit(allocator);
     var i: usize = 0;
     while (i < source.len) {
-        if (i + 6 <= source.len and std.mem.eql(u8, source[i..i+6], "layout")) {
+        if (i + 6 <= source.len and std.mem.eql(u8, source[i .. i + 6], "layout")) {
             var j = i + 6;
             j = skipSpaces(source, j);
             if (j < source.len and source[j] == '(') {
@@ -72,7 +80,10 @@ pub fn stripLayouts(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
                 while (k < source.len) : (k += 1) {
                     if (source[k] == '(') depth += 1 else if (source[k] == ')') {
                         depth -= 1;
-                        if (depth == 0) { k += 1; break; }
+                        if (depth == 0) {
+                            k += 1;
+                            break;
+                        }
                     }
                 }
                 // replace layout(...) with spaces to keep offsets
@@ -100,30 +111,30 @@ pub fn mapGLSLTypeToZig(allocator: std.mem.Allocator, glsl_type: []const u8) ![]
         .{ "int", "i32" },
         .{ "uint", "u32" },
         .{ "bool", "bool" },
-        .{ "vec2", "@import(\"math\").Vec(2, f32)" },
-        .{ "vec3", "@import(\"math\").Vec(3, f32)" },
-        .{ "vec4", "@import(\"math\").Vec(4, f32)" },
-        .{ "ivec2", "@import(\"math\").Vec(2, i32)" },
-        .{ "ivec3", "@import(\"math\").Vec(3, i32)" },
-        .{ "ivec4", "@import(\"math\").Vec(4, i32)" },
-        .{ "uvec2", "@import(\"math\").Vec(2, u32)" },
-        .{ "uvec3", "@import(\"math\").Vec(3, u32)" },
-        .{ "uvec4", "@import(\"math\").Vec(4, u32)" },
-        .{ "bvec2", "@import(\"math\").Vec(2, bool)" },
-        .{ "bvec3", "@import(\"math\").Vec(3, bool)" },
-        .{ "bvec4", "@import(\"math\").Vec(4, bool)" },
-        .{ "mat2", "@import(\"math\").Mat(2, 2, f32)" },
-        .{ "mat3", "@import(\"math\").Mat(3, 3, f32)" },
-        .{ "mat4", "@import(\"math\").Mat(4, 4, f32)" },
-        .{ "mat2x2", "@import(\"math\").Mat(2, 2, f32)" },
-        .{ "mat2x3", "@import(\"math\").Mat(2, 3, f32)" },
-        .{ "mat2x4", "@import(\"math\").Mat(2, 4, f32)" },
-        .{ "mat3x2", "@import(\"math\").Mat(3, 2, f32)" },
-        .{ "mat3x3", "@import(\"math\").Mat(3, 3, f32)" },
-        .{ "mat3x4", "@import(\"math\").Mat(3, 4, f32)" },
-        .{ "mat4x2", "@import(\"math\").Mat(4, 2, f32)" },
-        .{ "mat4x3", "@import(\"math\").Mat(4, 3, f32)" },
-        .{ "mat4x4", "@import(\"math\").Mat(4, 4, f32)" },
+        .{ "vec2", "@import(\"gl_graphics\").math.Vec(2, f32)" },
+        .{ "vec3", "@import(\"gl_graphics\").math.Vec(3, f32)" },
+        .{ "vec4", "@import(\"gl_graphics\").math.Vec(4, f32)" },
+        .{ "ivec2", "@import(\"gl_graphics\").math.Vec(2, i32)" },
+        .{ "ivec3", "@import(\"gl_graphics\").math.Vec(3, i32)" },
+        .{ "ivec4", "@import(\"gl_graphics\").math.Vec(4, i32)" },
+        .{ "uvec2", "@import(\"gl_graphics\").math.Vec(2, u32)" },
+        .{ "uvec3", "@import(\"gl_graphics\").math.Vec(3, u32)" },
+        .{ "uvec4", "@import(\"gl_graphics\").math.Vec(4, u32)" },
+        .{ "bvec2", "@import(\"gl_graphics\").math.Vec(2, bool)" },
+        .{ "bvec3", "@import(\"gl_graphics\").math.Vec(3, bool)" },
+        .{ "bvec4", "@import(\"gl_graphics\").math.Vec(4, bool)" },
+        .{ "mat2", "@import(\"gl_graphics\").math.Mat(2, 2, f32)" },
+        .{ "mat3", "@import(\"gl_graphics\").math.Mat(3, 3, f32)" },
+        .{ "mat4", "@import(\"gl_graphics\").math.Mat(4, 4, f32)" },
+        .{ "mat2x2", "@import(\"gl_graphics\").math.Mat(2, 2, f32)" },
+        .{ "mat2x3", "@import(\"gl_graphics\").math.Mat(2, 3, f32)" },
+        .{ "mat2x4", "@import(\"gl_graphics\").math.Mat(2, 4, f32)" },
+        .{ "mat3x2", "@import(\"gl_graphics\").math.Mat(3, 2, f32)" },
+        .{ "mat3x3", "@import(\"gl_graphics\").math.Mat(3, 3, f32)" },
+        .{ "mat3x4", "@import(\"gl_graphics\").math.Mat(3, 4, f32)" },
+        .{ "mat4x2", "@import(\"gl_graphics\").math.Mat(4, 2, f32)" },
+        .{ "mat4x3", "@import(\"gl_graphics\").math.Mat(4, 3, f32)" },
+        .{ "mat4x4", "@import(\"gl_graphics\").math.Mat(4, 4, f32)" },
     });
     if (builtin.get(glsl_type)) |zig_type| {
         return allocator.dupe(u8, zig_type);
@@ -133,14 +144,19 @@ pub fn mapGLSLTypeToZig(allocator: std.mem.Allocator, glsl_type: []const u8) ![]
     return allocator.dupe(u8, glsl_type);
 }
 
-pub fn isSamplerType(t: []const u8) bool { return std.mem.startsWith(u8, t, "sampler"); }
+pub fn isSamplerType(t: []const u8) bool {
+    return std.mem.startsWith(u8, t, "sampler");
+}
 
 pub fn parseStructs(allocator: std.mem.Allocator, source: []const u8) ![]StructDef {
     var list = std.ArrayList(StructDef).empty;
     errdefer {
         for (list.items) |*s| {
             allocator.free(s.name);
-            for (s.fields) |f| { allocator.free(f.typ); allocator.free(f.name); }
+            for (s.fields) |f| {
+                allocator.free(f.typ);
+                allocator.free(f.name);
+            }
             allocator.free(s.fields);
         }
         list.deinit(allocator);
@@ -152,15 +168,25 @@ pub fn parseStructs(allocator: std.mem.Allocator, source: []const u8) ![]StructD
         const before_ok = pos == 0 or !isAlnum(source[pos - 1]);
         const after = pos + 6;
         const after_ok = after >= source.len or isWhitespace(source[after]) or source[after] == '{' or source[after] == ' ';
-        if (!before_ok or !after_ok) { i = pos + 6; continue; }
+        if (!before_ok or !after_ok) {
+            i = pos + 6;
+            continue;
+        }
         var j = skipSpaces(source, after);
         // parse struct name
         const name_start = j;
         while (j < source.len and (isAlnum(source[j]) or source[j] == '_')) j += 1;
-        if (j == name_start) { i = j; continue; }
+        if (j == name_start) {
+            i = j;
+            continue;
+        }
         const struct_name = try allocator.dupe(u8, source[name_start..j]);
         j = skipSpaces(source, j);
-        if (j >= source.len or source[j] != '{') { allocator.free(struct_name); i = j; continue; }
+        if (j >= source.len or source[j] != '{') {
+            allocator.free(struct_name);
+            i = j;
+            continue;
+        }
         const brace_open = j;
         // find matching }
         var depth: usize = 0;
@@ -169,7 +195,10 @@ pub fn parseStructs(allocator: std.mem.Allocator, source: []const u8) ![]StructD
         while (k < source.len) : (k += 1) {
             if (source[k] == '{') depth += 1 else if (source[k] == '}') {
                 depth -= 1;
-                if (depth == 0) { close = k; break; }
+                if (depth == 0) {
+                    close = k;
+                    break;
+                }
             }
         }
         const brace_close = close orelse {
@@ -233,34 +262,50 @@ pub fn parseIns(allocator: std.mem.Allocator, source: []const u8) ![]FieldDef {
     // source should have layouts stripped and comments removed
     var list = std.ArrayList(FieldDef).empty;
     errdefer {
-        for (list.items) |f| { allocator.free(f.typ); allocator.free(f.name); }
+        for (list.items) |f| {
+            allocator.free(f.typ);
+            allocator.free(f.name);
+        }
         list.deinit(allocator);
     }
-    // Split by ';' statements
+    // Split by ';' statements — but `#version` and other directives may share a
+    // statement with the first `in` (e.g. "#version 300 es\nin vec3 aPos").
+    // Instead of requiring `in` at the start of the statement, search for the
+    // keyword `in` as a standalone word.
     var it = std.mem.splitScalar(u8, source, ';');
     while (it.next()) |stmt_raw| {
         var stmt = std.mem.trim(u8, stmt_raw, &[_]u8{ ' ', '\t', '\r', '\n' });
         if (stmt.len == 0) continue;
-        // Check for " in " pattern — attribute
-        // Handle possible "layout(...)" already stripped, so stmt now like "in vec3 aPos"
-        if (std.mem.startsWith(u8, stmt, "in ")) {
-            stmt = std.mem.trim(u8, stmt[3..], &[_]u8{ ' ', '\t' });
-            // now type + name
-            var tokens = std.ArrayList([]const u8).empty;
-            defer tokens.deinit(allocator);
-            var tok_it = std.mem.tokenizeAny(u8, stmt, " \t");
-            while (tok_it.next()) |tok| try tokens.append(allocator, tok);
-            if (tokens.items.len < 2) continue;
-            var type_idx: usize = 0;
-            if (tokens.items.len >= 3 and (std.mem.eql(u8, tokens.items[0], "highp") or std.mem.eql(u8, tokens.items[0], "mediump") or std.mem.eql(u8, tokens.items[0], "lowp"))) type_idx = 1;
-            const typ = tokens.items[type_idx];
-            var name = tokens.items[type_idx + 1];
-            if (std.mem.indexOfScalar(u8, name, '[')) |br| name = name[0..br];
-            if (std.mem.indexOfScalar(u8, name, ';')) |semi| name = name[0..semi];
-            const typ_c = try allocator.dupe(u8, typ);
-            const name_c = try allocator.dupe(u8, name);
-            try list.append(allocator, .{ .typ = typ_c, .name = name_c });
+        // Find `in` keyword as standalone word. Prefer the last occurrence
+        // in the statement to skip `#version` etc.
+        var in_pos: ?usize = null;
+        var search: usize = 0;
+        while (std.mem.indexOfPos(u8, stmt, search, "in ")) |pos| {
+            const before_ok = pos == 0 or isWhitespace(stmt[pos - 1]) or stmt[pos - 1] == '\n' or stmt[pos - 1] == ';';
+            const after = pos + 3;
+            const after_ok = after < stmt.len and !isWhitespace(stmt[after]) and stmt[after] != ';';
+            if (before_ok and after_ok) in_pos = pos;
+            search = pos + 3;
         }
+        // Fallback to original startsWith for simple cases
+        if (in_pos == null and std.mem.startsWith(u8, stmt, "in ")) in_pos = 0;
+        const pos = in_pos orelse continue;
+        stmt = std.mem.trim(u8, stmt[pos + 3 ..], &[_]u8{ ' ', '\t' });
+        // now type + name
+        var tokens = std.ArrayList([]const u8).empty;
+        defer tokens.deinit(allocator);
+        var tok_it = std.mem.tokenizeAny(u8, stmt, " \t");
+        while (tok_it.next()) |tok| try tokens.append(allocator, tok);
+        if (tokens.items.len < 2) continue;
+        var type_idx: usize = 0;
+        if (tokens.items.len >= 3 and (std.mem.eql(u8, tokens.items[0], "highp") or std.mem.eql(u8, tokens.items[0], "mediump") or std.mem.eql(u8, tokens.items[0], "lowp"))) type_idx = 1;
+        const typ = tokens.items[type_idx];
+        var name = tokens.items[type_idx + 1];
+        if (std.mem.indexOfScalar(u8, name, '[')) |br| name = name[0..br];
+        if (std.mem.indexOfScalar(u8, name, ';')) |semi| name = name[0..semi];
+        const typ_c = try allocator.dupe(u8, typ);
+        const name_c = try allocator.dupe(u8, name);
+        try list.append(allocator, .{ .typ = typ_c, .name = name_c });
     }
     return list.toOwnedSlice(allocator);
 }
@@ -272,7 +317,10 @@ pub fn parseUniforms(allocator: std.mem.Allocator, source: []const u8) ![]Unifor
             allocator.free(u.glsl_type);
             allocator.free(u.name);
             if (u.block_fields) |fields| {
-                for (fields) |f| { allocator.free(f.typ); allocator.free(f.name); }
+                for (fields) |f| {
+                    allocator.free(f.typ);
+                    allocator.free(f.name);
+                }
                 allocator.free(fields);
             }
         }
@@ -285,7 +333,10 @@ pub fn parseUniforms(allocator: std.mem.Allocator, source: []const u8) ![]Unifor
         const before_ok = uni_pos == 0 or !isAlnum(source[uni_pos - 1]);
         const after = uni_pos + 7;
         const after_ok = after >= source.len or isWhitespace(source[after]) or source[after] == '{' or source[after] == ' ' or source[after] == '\n' or source[after] == '\r';
-        if (!before_ok or !after_ok) { i = uni_pos + 7; continue; }
+        if (!before_ok or !after_ok) {
+            i = uni_pos + 7;
+            continue;
+        }
         const j = skipSpaces(source, after);
         // Peek for block case: need to handle optional identifier then '{'
         // Look ahead to see if next non-space after identifier is '{'
@@ -310,7 +361,10 @@ pub fn parseUniforms(allocator: std.mem.Allocator, source: []const u8) ![]Unifor
             while (k < source.len) : (k += 1) {
                 if (source[k] == '{') depth += 1 else if (source[k] == '}') {
                     depth -= 1;
-                    if (depth == 0) { close = k; break; }
+                    if (depth == 0) {
+                        close = k;
+                        break;
+                    }
                 }
             }
             const brace_close = close orelse {
@@ -395,7 +449,10 @@ pub fn parseUniforms(allocator: std.mem.Allocator, source: []const u8) ![]Unifor
             }
             const after_type = skipSpaces(source, type_end);
             // parse name
-            if (after_type >= source.len or !isAlpha(source[after_type])) { i = after_type; continue; }
+            if (after_type >= source.len or !isAlpha(source[after_type])) {
+                i = after_type;
+                continue;
+            }
             var k = after_type;
             while (k < source.len and (isAlnum(source[k]) or source[k] == '_')) k += 1;
             name_str = source[after_type..k];
@@ -431,7 +488,10 @@ pub fn parseUniforms(allocator: std.mem.Allocator, source: []const u8) ![]Unifor
 pub fn freeStructs(allocator: std.mem.Allocator, structs: []StructDef) void {
     for (structs) |*s| {
         allocator.free(s.name);
-        for (s.fields) |f| { allocator.free(f.typ); allocator.free(f.name); }
+        for (s.fields) |f| {
+            allocator.free(f.typ);
+            allocator.free(f.name);
+        }
         allocator.free(s.fields);
     }
     allocator.free(structs);
@@ -442,7 +502,10 @@ pub fn freeUniforms(allocator: std.mem.Allocator, uniforms: []UniformDef) void {
         allocator.free(u.glsl_type);
         allocator.free(u.name);
         if (u.block_fields) |fields| {
-            for (fields) |f| { allocator.free(f.typ); allocator.free(f.name); }
+            for (fields) |f| {
+                allocator.free(f.typ);
+                allocator.free(f.name);
+            }
             allocator.free(fields);
         }
     }
@@ -450,7 +513,10 @@ pub fn freeUniforms(allocator: std.mem.Allocator, uniforms: []UniformDef) void {
 }
 
 pub fn freeFields(allocator: std.mem.Allocator, fields: []FieldDef) void {
-    for (fields) |f| { allocator.free(f.typ); allocator.free(f.name); }
+    for (fields) |f| {
+        allocator.free(f.typ);
+        allocator.free(f.name);
+    }
     allocator.free(fields);
 }
 
@@ -469,8 +535,9 @@ pub fn readNodeFile(allocator: std.mem.Allocator, io: std.Io, nodePath: []const 
     while (walker.next(io) catch null) |entry| {
         if (entry.kind != .file) continue;
         const p = entry.path;
-        // Check suffix equals nodePath or ends with "/" + nodePath
-        if (std.mem.eql(u8, p, nodePath) or (p.len > nodePath.len and std.mem.endsWith(u8, p, nodePath) and p[p.len - nodePath.len - 1] == '/')) {
+        // Check suffix equals nodePath or ends with "/" or "\" + nodePath (cross-platform)
+        const is_sep = p.len > nodePath.len and (p[p.len - nodePath.len - 1] == '/' or p[p.len - nodePath.len - 1] == '\\');
+        if (std.mem.eql(u8, p, nodePath) or (p.len > nodePath.len and std.mem.endsWith(u8, p, nodePath) and is_sep)) {
             candidate = try allocator.dupe(u8, p);
             break;
         }
@@ -545,6 +612,20 @@ test "parse ins" {
     const ins = try parseIns(alloc, stripped);
     defer freeFields(alloc, ins);
     try std.testing.expectEqual(@as(usize, 2), ins.len);
+    try std.testing.expectEqualStrings("aPos", ins[0].name);
+    try std.testing.expectEqualStrings("vec3", ins[0].typ);
+}
+
+test "parse ins with version" {
+    const alloc = std.testing.allocator;
+    const src = "#version 300 es\n\nin vec3 aPos; \n\nout vec3 vColor;\n\nvoid main() { gl_Position = vec4(aPos, 1.0); }";
+    const no_comments = try stripComments(alloc, src);
+    defer alloc.free(no_comments);
+    const stripped = try stripLayouts(alloc, no_comments);
+    defer alloc.free(stripped);
+    const ins = try parseIns(alloc, stripped);
+    defer freeFields(alloc, ins);
+    try std.testing.expectEqual(@as(usize, 1), ins.len);
     try std.testing.expectEqualStrings("aPos", ins[0].name);
     try std.testing.expectEqualStrings("vec3", ins[0].typ);
 }

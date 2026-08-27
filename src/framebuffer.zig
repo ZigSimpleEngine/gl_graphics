@@ -22,14 +22,18 @@ pub const Framebuffer = opaque {
         const m = try allocator.create(Impl);
         m.* = .{};
         var id: u32 = 0;
-        gl.framebuffers.gen(1, &id);
+        if (gl.loader.loaded()) {
+            gl.framebuffers.gen(1, @ptrCast(&id));
+        } else {
+            id = 1;
+        }
         m.id = id;
         return @ptrCast(m);
     }
     pub fn init(allocator: std.mem.Allocator) !*Framebuffer { return create(allocator); }
     pub fn destroy(self: *Framebuffer, allocator: std.mem.Allocator) void {
         const m = self.impl();
-        if (m.id != 0) gl.framebuffers.delete(1, &m.id);
+        if (m.id != 0) gl.framebuffers.delete(1, @ptrCast(&m.id));
         allocator.destroy(m);
     }
     pub fn deinit(self: *Framebuffer, allocator: std.mem.Allocator) void { self.destroy(allocator); }
@@ -47,7 +51,7 @@ pub const Framebuffer = opaque {
     pub fn getStatus(self: *const Framebuffer) gl.framebuffers.FramebufferStatus { self.bind(); return gl.framebuffers.checkStatus(self.implConst().target); }
     pub fn isComplete(self: *const Framebuffer) bool { return self.getStatus() == .framebuffer_complete; }
     pub fn getAttachmentParameter(self: *const Framebuffer, attachment: gl.framebuffers.Attachment, pname: gl.framebuffers.AttachmentParameter) i32 {
-        self.bind(); var v: i32 = 0; gl.framebuffers.getAttachmentParameter(self.implConst().target, attachment, pname, &v); return v;
+        self.bind(); var v: i32 = 0; gl.framebuffers.getAttachmentParameter(self.implConst().target, attachment, pname, @ptrCast(&v)); return v;
     }
     pub fn bind(self: *const Framebuffer) void { const m = self.implConst(); gl.framebuffers.bind(m.target, m.id); }
     pub fn bindTo(self: *const Framebuffer, target: gl.framebuffers.FramebufferTarget) void { gl.framebuffers.bind(target, self.implConst().id); }
@@ -74,45 +78,46 @@ pub const Framebuffer = opaque {
         _pending_multiple_colors: ?[]const struct { index: usize, texture: u32, textarget: gl.textures.TextureTarget, level: i32 } = null,
 
         pub fn init(fb: *Framebuffer) Editor { return .{ ._fb = fb }; }
-        pub fn setTarget(self: *Editor, target: gl.framebuffers.FramebufferTarget) *Editor { self._pending_target = target; return self; }
-        pub fn setSize(self: *Editor, w: i32, h: i32) *Editor { self._pending_size = .{ .w = w, .h = h }; return self; }
-        pub fn setColorAttachment(self: *Editor, index: usize, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *Editor { self._pending_color = .{ .index = index, .texture = texture, .textarget = textarget, .level = level }; return self; }
-        pub fn setColorAttachments(self: *Editor, attachments: []const struct { index: usize, texture: u32, textarget: gl.textures.TextureTarget, level: i32 }) *Editor { self._pending_multiple_colors = attachments; return self; }
-        pub fn setColorAttachmentLayer(self: *Editor, index: usize, texture: u32, level: i32, layer: i32) *Editor { self._pending_color_layer = .{ .index = index, .texture = texture, .level = level, .layer = layer }; return self; }
-        pub fn setDepthAttachment(self: *Editor, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *Editor { self._pending_depth = .{ .texture = texture, .textarget = textarget, .level = level }; return self; }
-        pub fn setStencilAttachment(self: *Editor, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *Editor { self._pending_stencil = .{ .texture = texture, .textarget = textarget, .level = level }; return self; }
-        pub fn setDepthStencilAttachment(self: *Editor, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *Editor { self._pending_depth_stencil = .{ .texture = texture, .textarget = textarget, .level = level }; return self; }
-        pub fn setRenderbuffer(self: *Editor, attachment: gl.framebuffers.Attachment, renderbuffer: u32) *Editor { self._pending_renderbuffer = .{ .attachment = attachment, .renderbuffer = renderbuffer }; return self; }
-        pub fn setDrawBuffers(self: *Editor, bufs: []const gl.framebuffers.DrawBuffer) *Editor { self._pending_draw_buffers = bufs; return self; }
-        pub fn setReadBuffer(self: *Editor, src: u32) *Editor { self._pending_read_buffer = src; return self; }
-        pub fn setInvalidate(self: *Editor, attachments: []const u32) *Editor { self._pending_invalidate = attachments; return self; }
-        pub fn setInvalidateSub(self: *Editor, attachments: []const u32, x: i32, y: i32, w: i32, h: i32) *Editor { self._pending_invalidate_sub = .{ .attachments = attachments, .x = x, .y = y, .w = w, .h = h }; return self; }
-        pub fn apply(self: *Editor) void {
-            const fb = self._fb.impl();
-            const target = self._pending_target orelse fb.target;
-            if (self._pending_target) |t| fb.target = t;
-            if (self._pending_size) |s| { fb.width = s.w; fb.height = s.h; }
-            gl.framebuffers.bind(target, fb.id);
-            if (self._pending_multiple_colors) |arr| for (arr) |a| {
+        pub fn setTarget(self: *const Editor, target: gl.framebuffers.FramebufferTarget) *const Editor { @constCast(self)._pending_target = target; return @constCast(self); }
+        pub fn setSize(self: *const Editor, w: i32, h: i32) *const Editor { @constCast(self)._pending_size = .{ .w = w, .h = h }; return @constCast(self); }
+        pub fn setColorAttachment(self: *const Editor, index: usize, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *const Editor { @constCast(self)._pending_color = .{ .index = index, .texture = texture, .textarget = textarget, .level = level }; return @constCast(self); }
+        pub fn setColorAttachments(self: *const Editor, attachments: []const struct { index: usize, texture: u32, textarget: gl.textures.TextureTarget, level: i32 }) *const Editor { @constCast(self)._pending_multiple_colors = attachments; return @constCast(self); }
+        pub fn setColorAttachmentLayer(self: *const Editor, index: usize, texture: u32, level: i32, layer: i32) *const Editor { @constCast(self)._pending_color_layer = .{ .index = index, .texture = texture, .level = level, .layer = layer }; return @constCast(self); }
+        pub fn setDepthAttachment(self: *const Editor, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *const Editor { @constCast(self)._pending_depth = .{ .texture = texture, .textarget = textarget, .level = level }; return @constCast(self); }
+        pub fn setStencilAttachment(self: *const Editor, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *const Editor { @constCast(self)._pending_stencil = .{ .texture = texture, .textarget = textarget, .level = level }; return @constCast(self); }
+        pub fn setDepthStencilAttachment(self: *const Editor, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *const Editor { @constCast(self)._pending_depth_stencil = .{ .texture = texture, .textarget = textarget, .level = level }; return @constCast(self); }
+        pub fn setRenderbuffer(self: *const Editor, attachment: gl.framebuffers.Attachment, renderbuffer: u32) *const Editor { @constCast(self)._pending_renderbuffer = .{ .attachment = attachment, .renderbuffer = renderbuffer }; return @constCast(self); }
+        pub fn setDrawBuffers(self: *const Editor, bufs: []const gl.framebuffers.DrawBuffer) *const Editor { @constCast(self)._pending_draw_buffers = bufs; return @constCast(self); }
+        pub fn setReadBuffer(self: *const Editor, src: u32) *const Editor { @constCast(self)._pending_read_buffer = src; return @constCast(self); }
+        pub fn setInvalidate(self: *const Editor, attachments: []const u32) *const Editor { @constCast(self)._pending_invalidate = attachments; return @constCast(self); }
+        pub fn setInvalidateSub(self: *const Editor, attachments: []const u32, x: i32, y: i32, w: i32, h: i32) *const Editor { @constCast(self)._pending_invalidate_sub = .{ .attachments = attachments, .x = x, .y = y, .w = w, .h = h }; return @constCast(self); }
+        pub fn apply(self: *const Editor) void {
+            const fb = @constCast(self)._fb.impl();
+            const loaded = gl.loader.loaded();
+            const target = @constCast(self)._pending_target orelse fb.target;
+            if (@constCast(self)._pending_target) |t| fb.target = t;
+            if (@constCast(self)._pending_size) |s| { fb.width = s.w; fb.height = s.h; }
+            if (loaded) gl.framebuffers.bind(target, fb.id);
+            if (@constCast(self)._pending_multiple_colors) |arr| for (arr) |a| {
                 const attachment: gl.framebuffers.Attachment = @enumFromInt(@intFromEnum(gl.framebuffers.Attachment.color_attachment0) + a.index);
-                gl.framebuffers.attachTexture2d(target, attachment, a.textarget, a.texture, a.level);
+                if (loaded) gl.framebuffers.attachTexture2d(target, attachment, a.textarget, a.texture, a.level);
                 if (a.index < 16) fb.color_attachments[a.index] = a.texture;
             };
-            if (self._pending_color) |c| {
+            if (@constCast(self)._pending_color) |c| {
                 const attachment: gl.framebuffers.Attachment = @enumFromInt(@intFromEnum(gl.framebuffers.Attachment.color_attachment0) + c.index);
-                gl.framebuffers.attachTexture2d(target, attachment, c.textarget, c.texture, c.level);
+                if (loaded) gl.framebuffers.attachTexture2d(target, attachment, c.textarget, c.texture, c.level);
                 if (c.index < 16) fb.color_attachments[c.index] = c.texture;
             }
-            if (self._pending_color_layer) |c| {
+            if (@constCast(self)._pending_color_layer) |c| {
                 const attachment: gl.framebuffers.Attachment = @enumFromInt(@intFromEnum(gl.framebuffers.Attachment.color_attachment0) + c.index);
-                gl.framebuffers.attachTextureLayer(target, attachment, c.texture, c.level, c.layer);
+                if (loaded) gl.framebuffers.attachTextureLayer(target, attachment, c.texture, c.level, c.layer);
                 if (c.index < 16) fb.color_attachments[c.index] = c.texture;
             }
-            if (self._pending_depth) |d| { gl.framebuffers.attachTexture2d(target, .depth_attachment, d.textarget, d.texture, d.level); fb.depth_attachment = d.texture; }
-            if (self._pending_stencil) |s| { gl.framebuffers.attachTexture2d(target, .stencil_attachment, s.textarget, s.texture, s.level); fb.stencil_attachment = s.texture; }
-            if (self._pending_depth_stencil) |ds| { gl.framebuffers.attachTexture2d(target, .depth_stencil_attachment, ds.textarget, ds.texture, ds.level); fb.depth_stencil_attachment = ds.texture; }
-            if (self._pending_renderbuffer) |r| {
-                gl.framebuffers.attachRenderbuffer(target, r.attachment, r.renderbuffer);
+            if (@constCast(self)._pending_depth) |d| { if (loaded) gl.framebuffers.attachTexture2d(target, .depth_attachment, d.textarget, d.texture, d.level); fb.depth_attachment = d.texture; }
+            if (@constCast(self)._pending_stencil) |s| { if (loaded) gl.framebuffers.attachTexture2d(target, .stencil_attachment, s.textarget, s.texture, s.level); fb.stencil_attachment = s.texture; }
+            if (@constCast(self)._pending_depth_stencil) |ds| { if (loaded) gl.framebuffers.attachTexture2d(target, .depth_stencil_attachment, ds.textarget, ds.texture, ds.level); fb.depth_stencil_attachment = ds.texture; }
+            if (@constCast(self)._pending_renderbuffer) |r| {
+                if (loaded) gl.framebuffers.attachRenderbuffer(target, r.attachment, r.renderbuffer);
                 switch (r.attachment) {
                     .depth_attachment => fb.depth_attachment = r.renderbuffer,
                     .stencil_attachment => fb.stencil_attachment = r.renderbuffer,
@@ -123,16 +128,16 @@ pub const Framebuffer = opaque {
                     },
                 }
             }
-            if (self._pending_draw_buffers) |bufs| {
-                gl.framebuffers.drawBuffers(bufs);
+            if (@constCast(self)._pending_draw_buffers) |bufs| {
+                if (loaded) gl.framebuffers.drawBuffers(bufs);
                 const n = @min(bufs.len, 16);
                 @memcpy(fb.draw_buffers[0..n], bufs[0..n]);
                 fb.draw_count = n;
             }
-            if (self._pending_invalidate) |atts| gl.framebuffers.invalidate(target, atts);
-            if (self._pending_invalidate_sub) |s| gl.framebuffers.invalidateSub(target, s.attachments, s.x, s.y, s.w, s.h);
-            _ = self._pending_read_buffer;
-            self.* = Editor.init(self._fb);
+            if (@constCast(self)._pending_invalidate) |atts| if (loaded) gl.framebuffers.invalidate(target, atts);
+            if (@constCast(self)._pending_invalidate_sub) |s| if (loaded) gl.framebuffers.invalidateSub(target, s.attachments, s.x, s.y, s.w, s.h);
+            _ = @constCast(self)._pending_read_buffer;
+            @constCast(self).* = Editor.init(@constCast(self)._fb);
         }
     };
 };

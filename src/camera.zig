@@ -162,96 +162,96 @@ pub fn Camera(comptime scalar_type_: type) type {
             pub fn init(camera: *Self) Editor {
                 return .{ ._camera = camera };
             }
-            pub fn setFovY(self: *Editor, v: Scalar) *Editor {
-                self._pending_fov_y = v;
-                return self;
+            pub fn setFovY(self: *const Editor, v: Scalar) *const Editor {
+                @constCast(self)._pending_fov_y = v;
+                return @constCast(self);
             }
-            pub fn setAspect(self: *Editor, v: Scalar) *Editor {
-                self._pending_aspect = v;
-                return self;
+            pub fn setAspect(self: *const Editor, v: Scalar) *const Editor {
+                @constCast(self)._pending_aspect = v;
+                return @constCast(self);
             }
-            pub fn setNear(self: *Editor, v: Scalar) *Editor {
-                self._pending_near = v;
-                return self;
+            pub fn setNear(self: *const Editor, v: Scalar) *const Editor {
+                @constCast(self)._pending_near = v;
+                return @constCast(self);
             }
-            pub fn setFar(self: *Editor, v: Scalar) *Editor {
-                self._pending_far = v;
-                return self;
+            pub fn setFar(self: *const Editor, v: Scalar) *const Editor {
+                @constCast(self)._pending_far = v;
+                return @constCast(self);
             }
-            pub fn setPerspective(self: *Editor, fov_y: Scalar, aspect: Scalar, near: Scalar, far: Scalar) *Editor {
-                self._pending_perspective = true;
-                self._pending_fov_y = fov_y;
-                self._pending_aspect = aspect;
-                self._pending_near = near;
-                self._pending_far = far;
-                return self;
+            pub fn setPerspective(self: *const Editor, fov_y: Scalar, aspect: Scalar, near: Scalar, far: Scalar) *const Editor {
+                @constCast(self)._pending_perspective = true;
+                @constCast(self)._pending_fov_y = fov_y;
+                @constCast(self)._pending_aspect = aspect;
+                @constCast(self)._pending_near = near;
+                @constCast(self)._pending_far = far;
+                return @constCast(self);
             }
-            pub fn setOrtho(self: *Editor, left: Scalar, right: Scalar, bottom: Scalar, top: Scalar, near: Scalar, far: Scalar) *Editor {
-                self._pending_perspective = false;
-                self._pending_ortho = .{ .l = left, .r = right, .b = bottom, .t = top };
-                self._pending_near = near;
-                self._pending_far = far;
-                return self;
+            pub fn setOrtho(self: *const Editor, left: Scalar, right: Scalar, bottom: Scalar, top: Scalar, near: Scalar, far: Scalar) *const Editor {
+                @constCast(self)._pending_perspective = false;
+                @constCast(self)._pending_ortho = .{ .l = left, .r = right, .b = bottom, .t = top };
+                @constCast(self)._pending_near = near;
+                @constCast(self)._pending_far = far;
+                return @constCast(self);
             }
-            pub fn setViewport(self: *Editor, x: i32, y: i32, w: i32, h: i32) *Editor {
-                self._pending_viewport = .{ .x = x, .y = y, .w = w, .h = h };
-                return self;
+            pub fn setViewport(self: *const Editor, x: i32, y: i32, w: i32, h: i32) *const Editor {
+                @constCast(self)._pending_viewport = .{ .x = x, .y = y, .w = w, .h = h };
+                return @constCast(self);
             }
-            pub fn setPosition(self: *Editor, pos: Vec3) *Editor {
-                self._pending_position = pos;
-                return self;
+            pub fn setPosition(self: *const Editor, pos: Vec3) *const Editor {
+                @constCast(self)._pending_position = pos;
+                return @constCast(self);
             }
-            pub fn setLookAt(self: *Editor, eye: Vec3, center: Vec3, up: Vec3) *Editor {
-                self._pending_look_at = .{ .eye = eye, .center = center, .up = up };
-                return self;
+            pub fn setLookAt(self: *const Editor, eye: Vec3, center: Vec3, up: Vec3) *const Editor {
+                @constCast(self)._pending_look_at = .{ .eye = eye, .center = center, .up = up };
+                return @constCast(self);
             }
-            pub fn setTransform(self: *Editor, transform: *TransformT) *Editor {
-                self._camera.impl().transform = transform;
-                return self;
+            pub fn setTransform(self: *const Editor, transform: *TransformT) *const Editor {
+                @constCast(self)._camera.impl().transform = transform;
+                return @constCast(self);
             }
-            pub fn setOnUseCallback(self: *Editor, cb: ?*const fn (*Self) void) *Editor {
-                self._pending_on_use_callback = cb;
-                self._has_pending_on_use_callback = true;
-                return self;
+            pub fn setOnUseCallback(self: *const Editor, cb: ?*const fn (*Self) void) *const Editor {
+                @constCast(self)._pending_on_use_callback = cb;
+                @constCast(self)._has_pending_on_use_callback = true;
+                return @constCast(self);
             }
-            pub fn apply(self: *Editor) void {
-                const cam = self._camera.impl();
-                if (self._pending_fov_y) |v| cam.fov_y = v;
-                if (self._pending_aspect) |v| cam.aspect = v;
-                if (self._pending_near) |v| cam.near = v;
-                if (self._pending_far) |v| cam.far = v;
-                if (self._pending_perspective) |is_p| cam.is_perspective = is_p;
-                if (self._pending_ortho) |o| {
+            pub fn apply(self: *const Editor) void {
+                const cam = @constCast(self)._camera.impl();
+                if (@constCast(self)._pending_fov_y) |v| cam.fov_y = v;
+                if (@constCast(self)._pending_aspect) |v| cam.aspect = v;
+                if (@constCast(self)._pending_near) |v| cam.near = v;
+                if (@constCast(self)._pending_far) |v| cam.far = v;
+                if (@constCast(self)._pending_perspective) |is_p| cam.is_perspective = is_p;
+                if (@constCast(self)._pending_ortho) |o| {
                     cam.ortho_left = o.l;
                     cam.ortho_right = o.r;
                     cam.ortho_bottom = o.b;
                     cam.ortho_top = o.t;
                 }
-                if (self._pending_viewport) |vp| {
+                if (@constCast(self)._pending_viewport) |vp| {
                     cam.viewport_x = vp.x;
                     cam.viewport_y = vp.y;
                     cam.viewport_w = vp.w;
                     cam.viewport_h = vp.h;
-                    self._camera.applyViewport();
+                    @constCast(self)._camera.applyViewport();
                 }
-                if (self._pending_position) |p| {
-                    cam.transform.setPosition(p);
+                if (@constCast(self)._pending_position) |p| {
+                    cam.transform.position().* = p;
                     cam.transform.recalculateTransformMatrix();
                     recalcView(cam);
                 }
-                if (self._pending_look_at) |la| {
+                if (@constCast(self)._pending_look_at) |la| {
                     const eye_f = math.Vec(3, f32).init(.{ @floatCast(la.eye.v[0]), @floatCast(la.eye.v[1]), @floatCast(la.eye.v[2]) });
                     const center_f = math.Vec(3, f32).init(.{ @floatCast(la.center.v[0]), @floatCast(la.center.v[1]), @floatCast(la.center.v[2]) });
                     const up_f = math.Vec(3, f32).init(.{ @floatCast(la.up.v[0]), @floatCast(la.up.v[1]), @floatCast(la.up.v[2]) });
                     const view_f = math.mat.lookAt(eye_f, center_f, up_f);
                     cam.view = castMat4(view_f);
                     cam.transform.impl().matrix = cam.view.inverse();
-                    cam.transform.setPosition(Vec3.init(.{ cam.transform.impl().matrix.data[3].v[0], cam.transform.impl().matrix.data[3].v[1], cam.transform.impl().matrix.data[3].v[2] }));
+                    cam.transform.position().* = Vec3.init(.{ cam.transform.impl().matrix.data[3].v[0], cam.transform.impl().matrix.data[3].v[1], cam.transform.impl().matrix.data[3].v[2] });
                 }
-                if (self._has_pending_on_use_callback) cam.on_use_callback = self._pending_on_use_callback;
+                if (@constCast(self)._has_pending_on_use_callback) cam.on_use_callback = @constCast(self)._pending_on_use_callback;
                 recalcProjection(cam);
                 recalcView(cam);
-                self.* = Editor.init(self._camera);
+                @constCast(self).* = Editor.init(@constCast(self)._camera);
             }
             fn castMat4(m: math.Mat(4, 4, f32)) Mat4 {
                 if (Scalar == f32) return @bitCast(m);

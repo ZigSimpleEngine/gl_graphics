@@ -26,7 +26,8 @@ pub fn main(init: std.process.Init) !void {
     var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
 
-    try gl_graphics.printAnotherMessage(stdout_writer);
+    try stdout_writer.print("gl_graphics demo: library loaded with Texture, Buffer, Mesh, etc.\n", .{});
+    _ = gl_graphics; // ensure import is used
 
     try stdout_writer.flush(); // Don't forget to flush!
 }

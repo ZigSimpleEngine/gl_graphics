@@ -41,6 +41,17 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    // Dependencies via build.zig.zon (path dependencies)
+    const gl_dep = b.dependency("gl", .{ .target = target });
+    const gl_mod = gl_dep.module("gl");
+    const math_dep = b.dependency("math", .{ .target = target });
+    const math_mod = math_dep.module("math");
+    const assets_dep = b.dependency("assets_manager", .{});
+    const assets_mod = assets_dep.module("assets_manager");
+    mod.addImport("gl", gl_mod);
+    mod.addImport("math", math_mod);
+    mod.addImport("assets_manager", assets_mod);
+
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
     // to the module defined above, it's sometimes preferable to split business
@@ -79,6 +90,9 @@ pub fn build(b: *std.Build) void {
                 // can be extremely useful in case of collisions (which can happen
                 // importing modules from different packages).
                 .{ .name = "gl_graphics", .module = mod },
+                .{ .name = "gl", .module = gl_mod },
+                .{ .name = "math", .module = math_mod },
+                .{ .name = "assets_manager", .module = assets_mod },
             },
         }),
     });

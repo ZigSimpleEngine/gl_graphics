@@ -18,8 +18,12 @@ pub fn Transform(comptime scalar_type_: type) type {
             matrix: Mat4 = Mat4.identity(),
         };
 
-        inline fn impl(self: *Self) *Impl { return @ptrCast(@alignCast(self)); }
-        inline fn implConst(self: *const Self) *const Impl { return @ptrCast(@alignCast(self)); }
+        inline fn impl(self: *Self) *Impl {
+            return @ptrCast(@alignCast(self));
+        }
+        inline fn implConst(self: *const Self) *const Impl {
+            return @ptrCast(@alignCast(self));
+        }
 
         pub fn create(allocator: std.mem.Allocator) !*Self {
             const m = try allocator.create(Impl);
@@ -29,39 +33,63 @@ pub fn Transform(comptime scalar_type_: type) type {
         pub fn init(allocator: std.mem.Allocator, pos: Vec3, rot: QuatT, sc: Vec3) !*Self {
             const self = try create(allocator);
             const m = self.impl();
-            m.position = pos; m.rotation = rot; m.scale = sc;
+            m.position = pos;
+            m.rotation = rot;
+            m.scale = sc;
             self.recalculateTransformMatrix();
             return self;
         }
-        pub fn identity(allocator: std.mem.Allocator) !*Self { return create(allocator); }
+        pub fn identity(allocator: std.mem.Allocator) !*Self {
+            var transform = try create(allocator);
+            transform.scale().* = .one();
+            return transform;
+        }
 
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
             const m = self.impl();
             m.children.deinit(allocator);
             allocator.destroy(m);
         }
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void { self.destroy(allocator); }
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            self.destroy(allocator);
+        }
 
-        pub fn position(self: *Self) *Vec3 { return &self.impl().position; }
-        pub fn rotation(self: *Self) *QuatT { return &self.impl().rotation; }
-        pub fn scale(self: *Self) *Vec3 { return &self.impl().scale; }
-        pub fn getMatrix(self: *const Self) Mat4 { return self.implConst().matrix; }
+        pub fn position(self: *Self) *Vec3 {
+            return &self.impl().position;
+        }
+        pub fn rotation(self: *Self) *QuatT {
+            return &self.impl().rotation;
+        }
+        pub fn scale(self: *Self) *Vec3 {
+            return &self.impl().scale;
+        }
+        pub fn getMatrix(self: *const Self) Mat4 {
+            return self.implConst().matrix;
+        }
 
         pub fn getChild(self: *const Self, id: usize) ?*Self {
             const m = self.implConst();
             if (id >= m.children.items.len) return null;
             return m.children.items[id];
         }
-        pub fn getChildrenCount(self: *const Self) usize { return self.implConst().children.items.len; }
-        pub fn getChildren(self: *const Self) ChildrenIterator { return .{ .children = self.implConst().children.items, .index = 0 }; }
+        pub fn getChildrenCount(self: *const Self) usize {
+            return self.implConst().children.items.len;
+        }
+        pub fn getChildren(self: *const Self) ChildrenIterator {
+            return .{ .children = self.implConst().children.items, .index = 0 };
+        }
         pub const ChildrenIterator = struct {
             children: []*Self,
             index: usize,
             pub fn next(self: *ChildrenIterator) ?*Self {
                 if (self.index >= self.children.len) return null;
-                const v = self.children[self.index]; self.index += 1; return v;
+                const v = self.children[self.index];
+                self.index += 1;
+                return v;
             }
-            pub fn reset(self: *ChildrenIterator) void { self.index = 0; }
+            pub fn reset(self: *ChildrenIterator) void {
+                self.index = 0;
+            }
         };
         pub fn setChild(self: *Self, id: usize, transform: *Self) void {
             const m = self.impl();
@@ -84,8 +112,12 @@ pub fn Transform(comptime scalar_type_: type) type {
             if (child.impl().parent == self) child.impl().parent = null;
             _ = m.children.orderedRemove(id);
         }
-        pub fn getParent(self: *const Self) ?*Self { return self.implConst().parent; }
-        pub fn setParent(self: *Self, parent: ?*Self) void { self.impl().parent = parent; }
+        pub fn getParent(self: *const Self) ?*Self {
+            return self.implConst().parent;
+        }
+        pub fn setParent(self: *Self, parent: ?*Self) void {
+            self.impl().parent = parent;
+        }
 
         fn computeLocalMatrix(self: *const Self) Mat4 {
             const m = self.implConst();
@@ -105,9 +137,15 @@ pub fn Transform(comptime scalar_type_: type) type {
             var stack: std.ArrayList(*Self) = .empty;
             defer stack.deinit(allocator);
             var cur: ?*Self = self;
-            while (cur) |node| { try stack.append(allocator, node); cur = node.implConst().parent; }
+            while (cur) |node| {
+                try stack.append(allocator, node);
+                cur = node.implConst().parent;
+            }
             var i: usize = stack.items.len;
-            while (i > 0) { i -= 1; stack.items[i].recalculateTransformMatrix(); }
+            while (i > 0) {
+                i -= 1;
+                stack.items[i].recalculateTransformMatrix();
+            }
         }
         pub fn recalculateTransformMatricesDownward(self: *Self) void {
             self.recalculateTransformMatrix();

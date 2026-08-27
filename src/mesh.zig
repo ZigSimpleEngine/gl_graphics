@@ -86,7 +86,7 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
             m.vao = vao; m.vbo = vbo; m.ebo = ebo; m.initialized = true;
             return @ptrCast(m);
         }
-        pub fn init() *@This() { return create(std.heap.page_allocator) catch @panic("Mesh.init OOM"); }
+        pub fn init(allocator: std.mem.Allocator) !*@This() { return create(allocator); }
         pub fn destroy(self: *@This(), allocator: std.mem.Allocator) void {
             const m = self.impl();
             if (m.ebo != 0) gl.buffers.delete(1, &m.ebo);
@@ -94,7 +94,7 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
             if (m.vao != 0) gl.vertex_arrays.delete(1, &m.vao);
             allocator.destroy(m);
         }
-        pub fn deinit(self: *@This()) void { self.destroy(std.heap.page_allocator); }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void { self.destroy(allocator); }
         pub fn isValid(self: *const @This()) bool { const m = self.implConst(); return m.initialized and m.vao != 0; }
 
         pub fn getVao(self: *const @This()) u32 { return self.implConst().vao; }

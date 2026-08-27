@@ -26,14 +26,14 @@ pub fn Transform(comptime scalar_type_: type) type {
             m.* = .{};
             return @ptrCast(m);
         }
-        pub fn init(position: Vec3, rotation: QuatT, scale: Vec3) *Self {
-            const self = create(std.heap.page_allocator) catch @panic("Transform.init OOM");
+        pub fn init(allocator: std.mem.Allocator, position: Vec3, rotation: QuatT, scale: Vec3) !*Self {
+            const self = try create(allocator);
             const m = self.impl();
             m.position = position; m.rotation = rotation; m.scale = scale;
             self.recalculateTransformMatrix();
             return self;
         }
-        pub fn identity() *Self { return create(std.heap.page_allocator) catch @panic("Transform OOM"); }
+        pub fn identity(allocator: std.mem.Allocator) !*Self { return create(allocator); }
 
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
             const m = self.impl();
@@ -41,7 +41,6 @@ pub fn Transform(comptime scalar_type_: type) type {
             allocator.destroy(m);
         }
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void { self.destroy(allocator); }
-        pub fn deinitDefault(self: *Self) void { self.destroy(std.heap.page_allocator); }
 
         pub fn getPosition(self: *const Self) Vec3 { return self.implConst().position; }
         pub fn setPosition(self: *Self, v: Vec3) void { self.impl().position = v; }
@@ -105,11 +104,11 @@ pub fn Transform(comptime scalar_type_: type) type {
             const m = self.impl();
             if (m.parent) |p| m.matrix = p.implConst().matrix.mul(local) else m.matrix = local;
         }
-        pub fn recalculateTransformMatricesUpward(self: *Self) void {
+        pub fn recalculateTransformMatricesUpward(self: *Self, allocator: std.mem.Allocator) !void {
             var stack: std.ArrayList(*Self) = .empty;
-            defer stack.deinit(std.heap.page_allocator);
+            defer stack.deinit(allocator);
             var cur: ?*Self = self;
-            while (cur) |node| { stack.append(std.heap.page_allocator, node) catch break; cur = node.implConst().parent; }
+            while (cur) |node| { try stack.append(allocator, node); cur = node.implConst().parent; }
             var i: usize = stack.items.len;
             while (i > 0) { i -= 1; stack.items[i].recalculateTransformMatrix(); }
         }
@@ -118,14 +117,5 @@ pub fn Transform(comptime scalar_type_: type) type {
             const m = self.implConst();
             for (m.children.items) |child| child.recalculateTransformMatricesDownward();
         }
-        pub fn recalculateUpwardAlloc(self: *Self, allocator: std.mem.Allocator) !void {
-            var stack: std.ArrayList(*Self) = .empty;
-            defer stack.deinit(allocator);
-            var cur: ?*Self = self;
-            while (cur) |node| { try stack.append(allocator, node); cur = node.implConst().parent; }
-            var i: usize = stack.items.len;
-            while (i > 0) { i -= 1; stack.items[i].recalculateTransformMatrix(); }
-        }
-        pub fn recalculateDownwardAlloc(self: *Self, allocator: std.mem.Allocator) void { _ = allocator; self.recalculateTransformMatricesDownward(); }
     };
 }

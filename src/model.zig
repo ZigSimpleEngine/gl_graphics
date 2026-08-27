@@ -24,11 +24,11 @@ pub fn Model(comptime material_: type, comptime mesh_: type, comptime scalar_typ
             m.* = .{ .material = material, .mesh = mesh, .transform = transform, .on_use_callback = on_use_callback };
             return @ptrCast(m);
         }
-        pub fn init(material: *Material, mesh: *Mesh, transform: *TransformT, on_use_callback: ?*const fn (*Self) void) *Self {
-            return create(std.heap.page_allocator, material, mesh, transform, on_use_callback) catch @panic("Model OOM");
+        pub fn init(allocator: std.mem.Allocator, material: *Material, mesh: *Mesh, transform: *TransformT, on_use_callback: ?*const fn (*Self) void) !*Self {
+            return create(allocator, material, mesh, transform, on_use_callback);
         }
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void { allocator.destroy(self.impl()); }
-        pub fn deinit(self: *Self) void { self.destroy(std.heap.page_allocator); }
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void { self.destroy(allocator); }
 
         pub fn getMaterial(self: *const Self) *Material { return self.implConst().material; }
         pub fn getMesh(self: *const Self) *Mesh { return self.implConst().mesh; }

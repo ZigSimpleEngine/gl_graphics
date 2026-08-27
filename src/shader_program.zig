@@ -55,9 +55,9 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
             return self;
         }
 
-        pub fn instance() *Self {
+        pub fn instance(allocator: std.mem.Allocator) !*Self {
             if (_singleton) |s| if (s.implConst().initialized and s.implConst().id != 0) return s;
-            return create(std.heap.page_allocator) catch @panic("ShaderProgram OOM");
+            return create(allocator);
         }
 
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
@@ -67,7 +67,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
             if (_singleton == self) _singleton = null;
             allocator.destroy(m);
         }
-        pub fn deinit(self: *Self) void { self.destroy(std.heap.page_allocator); }
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void { self.destroy(allocator); }
 
         pub fn getId(self: *const Self) u32 { return self.implConst().id; }
         pub fn getVertCache(_: *const Self) if (@hasDecl(Vert, "IdCache")) Vert.IdCache else void { return vert_cache; }
@@ -79,8 +79,8 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         pub fn fragEdit(self: *const Self) if (has_frag) FragType.Editor else void {
             if (has_frag) return FragType.edit(self.implConst().id) else return {};
         }
-        pub fn vertEditStatic() Vert.Editor { const s = instance(); return s.vertEdit(); }
-        pub fn fragEditStatic() if (has_frag) FragType.Editor else void { if (has_frag) { const s = instance(); return s.fragEdit(); } else return {}; }
-        pub fn useStatic() void { const s = instance(); s.use(); }
+        pub fn vertEditStatic(allocator: std.mem.Allocator) !Vert.Editor { const s = try instance(allocator); return s.vertEdit(); }
+        pub fn fragEditStatic(allocator: std.mem.Allocator) !if (has_frag) FragType.Editor else void { if (has_frag) { const s = try instance(allocator); return s.fragEdit(); } else return {}; }
+        pub fn useStatic(allocator: std.mem.Allocator) !void { const s = try instance(allocator); s.use(); }
     };
 }

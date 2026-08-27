@@ -61,9 +61,9 @@ pub fn Camera(comptime scalar_type_: type) type {
             recalcProjection(m); recalcView(m);
             return @ptrCast(m);
         }
-        pub fn init(transform: *TransformT) *Self { return create(std.heap.page_allocator, transform) catch @panic("Camera OOM"); }
+        pub fn init(allocator: std.mem.Allocator, transform: *TransformT) !*Self { return create(allocator, transform); }
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void { allocator.destroy(self.impl()); }
-        pub fn deinit(self: *Self) void { self.destroy(std.heap.page_allocator); }
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void { self.destroy(allocator); }
 
         // Getters
         pub fn getTransform(self: *const Self) *TransformT { return self.implConst().transform; }

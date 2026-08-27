@@ -26,13 +26,13 @@ pub const Framebuffer = opaque {
         m.id = id;
         return @ptrCast(m);
     }
-    pub fn init() *Framebuffer { return create(std.heap.page_allocator) catch @panic("Framebuffer OOM"); }
+    pub fn init(allocator: std.mem.Allocator) !*Framebuffer { return create(allocator); }
     pub fn destroy(self: *Framebuffer, allocator: std.mem.Allocator) void {
         const m = self.impl();
         if (m.id != 0) gl.framebuffers.delete(1, &m.id);
         allocator.destroy(m);
     }
-    pub fn deinit(self: *Framebuffer) void { self.destroy(std.heap.page_allocator); }
+    pub fn deinit(self: *Framebuffer, allocator: std.mem.Allocator) void { self.destroy(allocator); }
     pub fn isValid(self: *const Framebuffer) bool { const m = self.implConst(); return m.id != 0 and gl.framebuffers.isFramebuffer(m.id); }
 
     pub fn getId(self: *const Framebuffer) u32 { return self.implConst().id; }

@@ -24,12 +24,13 @@ pub fn Material(comptime shader_program_: type) type {
 
         pub fn create(allocator: std.mem.Allocator, fill_fn: ?*const fn (*Self) void) !*Self {
             const m = try allocator.create(Impl);
-            m.* = .{ .fill_fn = fill_fn, .program = ShaderProgram.instance() };
+            const prog = try ShaderProgram.instance(allocator);
+            m.* = .{ .fill_fn = fill_fn, .program = prog };
             return @ptrCast(m);
         }
-        pub fn init(fill_fn: ?*const fn (*Self) void) *Self { return create(std.heap.page_allocator, fill_fn) catch @panic("Material OOM"); }
+        pub fn init(allocator: std.mem.Allocator, fill_fn: ?*const fn (*Self) void) !*Self { return create(allocator, fill_fn); }
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void { allocator.destroy(self.impl()); }
-        pub fn deinit(self: *Self) void { self.destroy(std.heap.page_allocator); }
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void { self.destroy(allocator); }
 
         pub fn getVertUniform(self: *const Self) VertUniform { return self.implConst().vertUniform; }
         pub fn getFragUniform(self: *const Self) FragUniform { return self.implConst().fragUniform; }

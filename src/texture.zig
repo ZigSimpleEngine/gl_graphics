@@ -44,6 +44,7 @@ pub const Texture = opaque {
 
     // ------------------------------------------------------------
     // Construction / lifecycle — opaque: heap allocated, caller gets *Texture
+    // Explicit allocator required per Zig style.
     // ------------------------------------------------------------
     pub fn create(allocator: std.mem.Allocator) !*Texture {
         const m = try allocator.create(Impl);
@@ -54,9 +55,8 @@ pub const Texture = opaque {
         return @ptrCast(m);
     }
 
-    /// Convenience init using page_allocator, panics on OOM.  Caller must `deinit`.
-    pub fn init() *Texture {
-        return create(std.heap.page_allocator) catch @panic("Texture.init OOM");
+    pub fn init(allocator: std.mem.Allocator) !*Texture {
+        return create(allocator);
     }
 
     pub fn destroy(self: *Texture, allocator: std.mem.Allocator) void {
@@ -65,8 +65,8 @@ pub const Texture = opaque {
         allocator.destroy(m);
     }
 
-    pub fn deinit(self: *Texture) void {
-        self.destroy(std.heap.page_allocator);
+    pub fn deinit(self: *Texture, allocator: std.mem.Allocator) void {
+        self.destroy(allocator);
     }
 
     pub fn isValid(self: *const Texture) bool {

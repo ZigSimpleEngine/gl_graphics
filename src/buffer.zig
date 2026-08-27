@@ -26,13 +26,13 @@ pub fn Buffer(comptime data_: type) type {
             m.id = id;
             return @ptrCast(m);
         }
-        pub fn init() *@This() { return create(std.heap.page_allocator) catch @panic("Buffer.init OOM"); }
+        pub fn init(allocator: std.mem.Allocator) !*@This() { return create(allocator); }
         pub fn destroy(self: *@This(), allocator: std.mem.Allocator) void {
             const m = self.impl();
             if (m.id != 0) gl.buffers.delete(1, &m.id);
             allocator.destroy(m);
         }
-        pub fn deinit(self: *@This()) void { self.destroy(std.heap.page_allocator); }
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void { self.destroy(allocator); }
 
         pub fn isValid(self: *const @This()) bool { const m = self.implConst(); return m.id != 0 and gl.buffers.isBuffer(m.id); }
 

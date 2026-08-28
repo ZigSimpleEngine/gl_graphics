@@ -629,7 +629,114 @@ pub fn readNodeFile(allocator: std.mem.Allocator, io: std.Io, nodePath: []const 
 pub fn resolveIncludePath(allocator: std.mem.Allocator, baseFilePath: []const u8, includeRaw: []const u8) ![]u8 {
     if (std.fs.path.isAbsolute(includeRaw)) return allocator.dupe(u8, includeRaw);
     const dir = std.fs.path.dirname(baseFilePath) orelse ".";
+    // Relative include in the same directory: keep the bare name so that
+    // `readNodeFile` can resolve it through its path suffix walker.
+    if (std.mem.eql(u8, dir, ".")) return allocator.dupe(u8, includeRaw);
     return std.fs.path.join(allocator, &.{ dir, includeRaw });
+}
+
+/// Recursively processes a shader source, inlining `#include` contents at
+/// their exact position (so declarations keep their original order), dropping
+/// `#version`/`#include` directives and registering struct definitions
+/// declared in `.glsl` files into `link_map` (struct name -> owning file
+/// identifier, e.g. "Light" -> "common").
+fn processShaderFile(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    out: *std.ArrayList(u8),
+    src: []const u8,
+    path: []const u8,
+    visited: *std.StringHashMap(void),
+    link_map: *std.StringHashMap([]u8),
+) !void {
+    var it = std.mem.splitScalar(u8, src, '\n');
+    while (it.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, &[_]u8{ ' ', '\t', '\r' });
+        if (std.mem.startsWith(u8, trimmed, "#include")) {
+            const inc = blk: {
+                var rest = std.mem.trim(u8, trimmed["#include".len..], &[_]u8{ ' ', '\t' });
+                if (rest.len >= 2 and (rest[0] == '"' or rest[0] == '<')) {
+                    const endC: u8 = if (rest[0] == '"') '"' else '>';
+                    if (std.mem.indexOfScalar(u8, rest[1..], endC)) |end| {
+                        break :blk rest[1 .. 1 + end];
+                    }
+                }
+                break :blk "";
+            };
+            if (inc.len > 0) {
+                const resolved = try resolveIncludePath(gpa, path, inc);
+                if (!visited.contains(resolved)) {
+                    try visited.put(try gpa.dupe(u8, resolved), {});
+                    if (try readNodeFile(gpa, io, resolved)) |content| {
+                        const c = if (std.mem.startsWith(u8, content, "\xEF\xBB\xBF")) content[3..] else content;
+                        if (std.mem.endsWith(u8, resolved, ".glsl")) {
+                            const inc_base = std.fs.path.basename(resolved);
+                            const dot = std.mem.lastIndexOfScalar(u8, inc_base, '.');
+                            const base = if (dot) |d| inc_base[0..d] else inc_base;
+                            const inc_ident = try text_utils.filenameToIdentifier(gpa, base);
+                            const inc_no_comments = try stripComments(gpa, c);
+                            const inc_structs = try parseStructs(gpa, inc_no_comments);
+                            for (inc_structs) |s| {
+                                const key = try gpa.dupe(u8, s.name);
+                                const ident_copy = try gpa.dupe(u8, inc_ident);
+                                if (!link_map.contains(key)) {
+                                    try link_map.put(key, ident_copy);
+                                } else {
+                                    gpa.free(key);
+                                    gpa.free(ident_copy);
+                                }
+                            }
+                            freeStructs(gpa, inc_structs);
+                            gpa.free(inc_no_comments);
+                            gpa.free(inc_ident);
+                        }
+                        try processShaderFile(gpa, io, out, c, resolved, visited, link_map);
+                        gpa.free(content);
+                    }
+                }
+                gpa.free(resolved);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "#version")) continue;
+        try out.appendSlice(gpa, line);
+        try out.append(gpa, '\n');
+    }
+}
+
+/// Resolves `#include` directives into a single GLSL source text. The main
+/// file's `#version` is kept as the first line; includes are inlined at the
+/// position of their directive.
+/// Parameters:
+/// - gpa: allocator for internal use.
+/// - io: Io interface for file reads.
+/// - out: output buffer for the assembled source.
+/// - main_src: source of the main shader file.
+/// - main_path: path of the main shader file.
+/// - visited: set of already-included paths (caller owned).
+/// - link_map: struct name -> owning .glsl identifier registry.
+/// Returns: void.
+pub fn resolveShaderIncludes(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    out: *std.ArrayList(u8),
+    main_src: []const u8,
+    main_path: []const u8,
+    visited: *std.StringHashMap(void),
+    link_map: *std.StringHashMap([]u8),
+) !void {
+    {
+        var it = std.mem.splitScalar(u8, main_src, '\n');
+        while (it.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, &[_]u8{ ' ', '\t', '\r' });
+            if (std.mem.startsWith(u8, trimmed, "#version")) {
+                try out.appendSlice(gpa, line);
+                try out.append(gpa, '\n');
+                break;
+            }
+        }
+    }
+    try processShaderFile(gpa, io, out, main_src, main_path, visited, link_map);
 }
 
 test "parse structs" {

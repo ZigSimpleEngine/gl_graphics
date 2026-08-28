@@ -83,11 +83,18 @@ pub const GlslDescriptor = struct {
                     try inner.appendSlice(gpa, "        ");
                     try inner.appendSlice(gpa, f.name);
                     try inner.appendSlice(gpa, ": ");
-                    try inner.appendSlice(gpa, zig_type);
                     if (f.is_array) {
                         if (f.array_len) |len| {
-                            _ = len;
+                            const tmp = try std.fmt.allocPrint(gpa, "[{d}]{s}", .{ len, zig_type });
+                            defer gpa.free(tmp);
+                            try inner.appendSlice(gpa, tmp);
+                        } else {
+                            const tmp = try std.fmt.allocPrint(gpa, "[]{s}", .{zig_type});
+                            defer gpa.free(tmp);
+                            try inner.appendSlice(gpa, tmp);
                         }
+                    } else {
+                        try inner.appendSlice(gpa, zig_type);
                     }
                     try inner.appendSlice(gpa, ",\n");
                 }

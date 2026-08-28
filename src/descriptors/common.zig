@@ -432,10 +432,22 @@ pub fn parseUniforms(allocator: std.mem.Allocator, source: []const u8) ![]Unifor
                 if (tokens.items.len >= 3 and (std.mem.eql(u8, tokens.items[0], "highp") or std.mem.eql(u8, tokens.items[0], "mediump") or std.mem.eql(u8, tokens.items[0], "lowp"))) type_idx = 1;
                 const typ = tokens.items[type_idx];
                 var name = tokens.items[type_idx + 1];
-                if (std.mem.indexOfScalar(u8, name, '[')) |br| name = name[0..br];
+                var is_arr = false;
+                var arr_len: ?usize = null;
+                if (std.mem.indexOfScalar(u8, name, '[')) |br| {
+                    is_arr = true;
+                    const name_only = name[0..br];
+                    const arr_part = name[br..];
+                    if (std.mem.indexOfScalar(u8, arr_part, ']')) |_| {
+                        const inside = arr_part[1 .. arr_part.len - 1];
+                        const trimmed_inside = std.mem.trim(u8, inside, &[_]u8{ ' ', '\t' });
+                        if (trimmed_inside.len > 0) arr_len = std.fmt.parseInt(usize, trimmed_inside, 10) catch null;
+                    }
+                    name = name_only;
+                }
                 const typ_c = try allocator.dupe(u8, typ);
                 const name_c = try allocator.dupe(u8, name);
-                try fields.append(allocator, .{ .typ = typ_c, .name = name_c });
+                try fields.append(allocator, .{ .typ = typ_c, .name = name_c, .is_array = is_arr, .array_len = arr_len });
             }
             const fields_slice = try fields.toOwnedSlice(allocator);
             var after_close = skipSpaces(source, brace_close + 1);

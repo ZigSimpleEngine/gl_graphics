@@ -33,6 +33,16 @@ pub const Material = @import("material.zig").Material;
 /// Common GLSL parsing utilities.
 pub const common = @import("descriptors/common.zig");
 
+/// Shared runtime used by descriptor-generated shader code, so every
+/// generated shader references the same functions instead of embedding
+/// its own copy.
+pub const shader_runtime = @import("shader_runtime.zig");
+pub const uploadUniformValue = shader_runtime.uploadUniformValue;
+pub const flattenUniforms = shader_runtime.flattenUniforms;
+pub const applyUniforms = shader_runtime.applyUniforms;
+pub const compileShaderSource = shader_runtime.compileShaderSource;
+pub const disposeShader = shader_runtime.disposeShader;
+
 /// Asset descriptors for generating Zig code from GLSL.
 pub const descriptors = struct {
     /// Descriptor for `.glsl` files with structs.

@@ -1,37 +1,66 @@
 const std = @import("std");
 
-// High-level GL ES 3.0 abstractions (gl_graphics)
-// Each module follows opaque pattern + Editor (MethodChain) for deferred batched GL calls.
-
+/// Texture — opaque wrapper over GL texture with deferred editor.
 pub const Texture = @import("texture.zig").Texture;
+
+/// Buffer — typed wrapper over GL buffer.
 pub const Buffer = @import("buffer.zig").Buffer;
+
+/// Mesh — VAO/VBO/EBO with computed vertex layout.
 pub const Mesh = @import("mesh.zig").Mesh;
+
+/// Framebuffer — wrapper over GL FBO.
 pub const Framebuffer = @import("framebuffer.zig").Framebuffer;
 
-pub const Map = @import("map.zig").Map;
-pub const Transform = @import("transform.zig").Transform;
+/// Global registry by comptime name, re-exported from `core`.
+pub const Map = @import("core").Map;
+
+/// Hierarchical transform, re-exported from `core`.
+pub const Transform = @import("core").Transform;
+
+/// Model — combination of material, mesh and transform.
 pub const Model = @import("model.zig").Model;
+
+/// Camera with projection and viewport.
 pub const Camera = @import("camera.zig").Camera;
 
+/// Shader program, parameterized by vertex and fragment shaders.
 pub const ShaderProgram = @import("shader_program.zig").ShaderProgram;
+
+/// Material — container for uniforms and program.
 pub const Material = @import("material.zig").Material;
 
+/// Common GLSL parsing utilities.
 pub const common = @import("descriptors/common.zig");
+
+/// Asset descriptors for generating Zig code from GLSL.
 pub const descriptors = struct {
+    /// Descriptor for `.glsl` files with structs.
     pub const GlslDescriptor = @import("descriptors/glsl.zig").GlslDescriptor;
+
+    /// Descriptor for vertex shaders `.vert`.
     pub const VertexDescriptor = @import("descriptors/vert.zig").VertexDescriptor;
+
+    /// Descriptor for fragment shaders `.frag`.
     pub const FragmentDescriptor = @import("descriptors/frag.zig").FragmentDescriptor;
+
+    /// Alias for common utilities.
     pub const Common = common;
 };
 
-// Re-export helpers for convenience
+/// Re-export `gl` for consumer convenience.
 pub const gl = @import("gl");
+
+/// Re-export `math`.
 pub const math = @import("math");
+
+/// Re-export asset manager.
 pub const assets_manager = @import("assets_manager");
 
+/// Re-export `core` (Transform, Map).
+pub const core = @import("core");
+
 test "smoke — texture opaque + editor chain" {
-    // This test only validates type-level API without a real GL context (no loader).
-    // We test struct layout and method chain compilation.
     _ = Texture;
     _ = Buffer(u16);
     _ = Mesh(u16, struct { pos: math.Vec(3, f32), uv: math.Vec(2, f32) });
@@ -42,30 +71,55 @@ test "smoke — texture opaque + editor chain" {
         pub const Uniform = struct { uMvp: math.Mat(4, 4, f32) };
         pub const IdCache = struct { uMvp: i32 };
         pub var id: u32 = 0;
-        pub fn instance() u32 { return 1; }
+        pub fn instance() u32 {
+            return 1;
+        }
         pub fn dispose() void {}
         pub const Editor = struct {
             _program: u32,
-            pub fn init(p: u32) @This() { return .{ ._program = p }; }
-            pub fn setUniform(self: *@This(), u: Uniform) *@This() { _ = u; return self; }
-            pub fn set_uMvp(self: *@This(), v: math.Mat(4, 4, f32)) *@This() { _ = v; return self; }
-            pub fn apply(self: *@This()) void { _ = self; }
+            pub fn init(p: u32) @This() {
+                return .{ ._program = p };
+            }
+            pub fn setUniform(self: *@This(), u: Uniform) *@This() {
+                _ = u;
+                return self;
+            }
+            pub fn set_uMvp(self: *@This(), v: math.Mat(4, 4, f32)) *@This() {
+                _ = v;
+                return self;
+            }
+            pub fn apply(self: *@This()) void {
+                _ = self;
+            }
         };
-        pub fn edit(p: u32) Editor { return Editor.init(p); }
+        pub fn edit(p: u32) Editor {
+            return Editor.init(p);
+        }
     };
     const DummyFrag = struct {
         pub const Uniform = struct { uColor: math.Vec(4, f32) };
         pub const IdCache = struct { uColor: i32 };
         pub var id: u32 = 0;
-        pub fn instance() u32 { return 2; }
+        pub fn instance() u32 {
+            return 2;
+        }
         pub fn dispose() void {}
         pub const Editor = struct {
             _program: u32,
-            pub fn init(p: u32) @This() { return .{ ._program = p }; }
-            pub fn setUniform(self: *@This(), u: Uniform) *@This() { _ = u; return self; }
-            pub fn apply(self: *@This()) void { _ = self; }
+            pub fn init(p: u32) @This() {
+                return .{ ._program = p };
+            }
+            pub fn setUniform(self: *@This(), u: Uniform) *@This() {
+                _ = u;
+                return self;
+            }
+            pub fn apply(self: *@This()) void {
+                _ = self;
+            }
         };
-        pub fn edit(p: u32) Editor { return Editor.init(p); }
+        pub fn edit(p: u32) Editor {
+            return Editor.init(p);
+        }
     };
     _ = ShaderProgram(DummyVert, DummyFrag);
     _ = Material(ShaderProgram(DummyVert, DummyFrag));
@@ -102,16 +156,13 @@ test "mesh layout compile" {
         normal: math.Vec(3, f32),
     };
     const M = Mesh(u16, Vertex);
-    // Verify layout computed
     try std.testing.expect(M.Layout.len == 3);
     try std.testing.expectEqual(@as(i32, 3), M.Layout[0].size);
     try std.testing.expectEqual(@as(i32, 2), M.Layout[1].size);
 }
 
 test "descriptors parse" {
-    // Force import of descriptor common tests
     _ = common;
-    // Also ensure Glsl/Vert/Frag descriptors are referenced
     _ = descriptors.GlslDescriptor;
     _ = descriptors.VertexDescriptor;
     _ = descriptors.FragmentDescriptor;
@@ -142,9 +193,7 @@ test "mesh editor chain const" {
     const mesh = try M.create(gpa);
     defer mesh.destroy(gpa);
     const verts = [_]V{ .{ .pos = math.Vec(3, f32).zero() } };
-    // Exact chain from user report — should compile with *const set*
     mesh.edit().setVertices(verts[0..]).apply();
-    // Also test chained setIndices
     const inds = [_]u16{0};
     mesh.edit().setVertices(verts[0..]).setIndices(inds[0..]).apply();
 }

@@ -1,16 +1,28 @@
+﻿/// Standard library import.
 const std = @import("std");
+/// Descriptor type from assets_manager.
 const Descriptor = @import("assets_manager").descriptors.Descriptor;
+/// Node type for asset tree traversal.
 const Node = @import("assets_manager").assets_tree.Node;
+/// Text utilities for code generation.
 const text_utils = @import("assets_manager").text_utils;
+/// Common GLSL parsing utilities.
 const common = @import("common.zig");
 
-// GlslDescriptor — handles .glsl files, generates Zig struct containing
-// only struct declarations from the source file.
+/// Descriptor that generates Zig structs from GLSL struct declarations.
 pub const GlslDescriptor = struct {
+    /// Number of spaces to indent per depth level.
     spaces_per_depth: usize = 4,
 
+    /// Tests whether a node is suitable for generic GLSL generation.
+    /// Parameters:
+    /// - ptr: opaque descriptor pointer unused.
+    /// - init: process init context unused.
+    /// - data: descriptor data containing node to test.
+    /// Returns: true when node is a .glsl file.
     pub fn isSuitableData(ptr: *anyopaque, init: std.process.Init, data: Descriptor.Data) anyerror!bool {
-        _ = ptr; _ = init;
+        _ = ptr;
+        _ = init;
         const node = data.node;
         if (node.kind != .file) return false;
         if (node.name) |name| {
@@ -19,6 +31,12 @@ pub const GlslDescriptor = struct {
         return false;
     }
 
+    /// Generates Zig source code for a generic GLSL file containing struct definitions.
+    /// Parameters:
+    /// - ptr: opaque descriptor pointer to self.
+    /// - init: process init providing allocators and IO.
+    /// - data: descriptor data with node, depth and path info.
+    /// Returns: allocated Zig source string.
     pub fn getCode(ptr: *anyopaque, init: std.process.Init, data: Descriptor.Data) anyerror![]u8 {
         const self: *GlslDescriptor = @ptrCast(@alignCast(ptr));
         const gpa = init.gpa;
@@ -33,15 +51,12 @@ pub const GlslDescriptor = struct {
         defer gpa.free(path);
 
         const identifier_raw = node.name orelse return error.MissingName;
-        // strip extension
         const dot = std.mem.lastIndexOfScalar(u8, identifier_raw, '.');
         const baseName = if (dot) |d| identifier_raw[0..d] else identifier_raw;
         const var_name = try text_utils.filenameToIdentifier(gpa, baseName);
         defer gpa.free(var_name);
 
-        // Read file content via common helper (walk)
         const rawContent = try common.readNodeFile(gpa, io, path) orelse blk: {
-            // fallback: try path with assets prefix? already attempted fallback; give empty
             break :blk try gpa.dupe(u8, "");
         };
         defer gpa.free(rawContent);
@@ -52,11 +67,9 @@ pub const GlslDescriptor = struct {
         const structs = try common.parseStructs(gpa, no_comments);
         defer common.freeStructs(gpa, structs);
 
-        // Build inner struct definitions
         var inner = std.ArrayList(u8).empty;
         defer inner.deinit(gpa);
 
-        // If no structs, generate empty struct placeholder with comment
         if (structs.len == 0) {
             try inner.appendSlice(gpa, "    // No struct declarations found in .glsl source.\n");
         } else {
@@ -73,13 +86,6 @@ pub const GlslDescriptor = struct {
                     try inner.appendSlice(gpa, zig_type);
                     if (f.is_array) {
                         if (f.array_len) |len| {
-                            // Convert to array type: [len]Child
-                            // Need to rewrite previous line? For now emit as array field type override
-                            // We already emitted child type, need to wrap: Instead we stored child, so we should emit array syntax directly
-                            // Our map already gave child type, we need to adjust: replace line
-                            // Simple: emit array type directly without prior map? We handled via map then not array.
-                            // For now emit as "[len]type" — we did not. We'll fix by replacing.
-                            // To keep simple, we ignore array len and emit slice type warning.
                             _ = len;
                         }
                     }
@@ -105,6 +111,10 @@ pub const GlslDescriptor = struct {
             });
     }
 
+    /// Returns a Descriptor vtable for this GLSL descriptor.
+    /// Parameters:
+    /// - self: pointer to descriptor instance.
+    /// Returns: Descriptor with vtable.
     pub fn descriptor(self: *GlslDescriptor) Descriptor {
         return .{
             .ptr = self,

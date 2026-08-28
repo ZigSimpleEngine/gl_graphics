@@ -1,20 +1,40 @@
+﻿/// Standard library import.
 const std = @import("std");
+/// Descriptor type from assets_manager.
 const Descriptor = @import("assets_manager").descriptors.Descriptor;
+/// Node type for asset tree traversal.
 const Node = @import("assets_manager").assets_tree.Node;
+/// Text utilities for code generation.
 const text_utils = @import("assets_manager").text_utils;
+/// Common GLSL parsing utilities.
 const common = @import("common.zig");
 
+/// Descriptor that generates Zig code for vertex shader assets.
 pub const VertexDescriptor = struct {
+    /// Number of spaces to indent per depth level.
     spaces_per_depth: usize = 4,
 
+    /// Tests whether a node is suitable for vertex shader generation.
+    /// Parameters:
+    /// - ptr: opaque descriptor pointer unused.
+    /// - init: process init context unused.
+    /// - data: descriptor data containing node to test.
+    /// Returns: true when node is a .vert file.
     pub fn isSuitableData(ptr: *anyopaque, init: std.process.Init, data: Descriptor.Data) anyerror!bool {
-        _ = ptr; _ = init;
+        _ = ptr;
+        _ = init;
         const node = data.node;
         if (node.kind != .file) return false;
         if (node.name) |name| return std.mem.endsWith(u8, name, ".vert");
         return false;
     }
 
+    /// Generates Zig source code for a vertex shader asset.
+    /// Parameters:
+    /// - ptr: opaque descriptor pointer to self.
+    /// - init: process init providing allocators and IO.
+    /// - data: descriptor data with node, depth and path info.
+    /// Returns: allocated Zig source string.
     pub fn getCode(ptr: *anyopaque, init: std.process.Init, data: Descriptor.Data) anyerror![]u8 {
         const self: *VertexDescriptor = @ptrCast(@alignCast(ptr));
         const gpa = init.gpa;
@@ -32,15 +52,12 @@ pub const VertexDescriptor = struct {
         const var_name = try text_utils.filenameToIdentifier(gpa, identifier_raw);
         defer gpa.free(var_name);
 
-        // embed path for instance()
         const embed_path = try std.fmt.allocPrint(gpa, "{s}{s}", .{ data.path_to_root_node, path });
         defer gpa.free(embed_path);
 
-        // Read main file content
         const raw_main = try common.readNodeFile(gpa, io, path) orelse try gpa.dupe(u8, "");
         defer gpa.free(raw_main);
 
-        // Collect includes recursively
         var include_contents = std.ArrayList([]u8).empty;
         defer {
             for (include_contents.items) |c| gpa.free(c);
@@ -49,13 +66,11 @@ pub const VertexDescriptor = struct {
         var visited = std.StringHashMap(void).init(gpa);
         defer visited.deinit();
 
-        // Parse includes from raw_main (and nested)
         var include_queue = std.ArrayList([]u8).empty;
         defer {
             for (include_queue.items) |s| gpa.free(s);
             include_queue.deinit(gpa);
         }
-        // First level includes from main
         {
             const lines = raw_main;
             var it = std.mem.splitScalar(u8, lines, '\n');
@@ -74,7 +89,6 @@ pub const VertexDescriptor = struct {
                 }
             }
         }
-        // BFS resolve includes and collect their contents
         var idx: usize = 0;
         while (idx < include_queue.items.len) : (idx += 1) {
             const inc_path = include_queue.items[idx];
@@ -83,7 +97,6 @@ pub const VertexDescriptor = struct {
             const content = try common.readNodeFile(gpa, io, inc_path);
             if (content) |c| {
                 try include_contents.append(gpa, c);
-                // Also scan this content for nested includes
                 var line_it = std.mem.splitScalar(u8, c, '\n');
                 while (line_it.next()) |line| {
                     const trimmed = std.mem.trim(u8, line, &[_]u8{ ' ', '\t', '\r' });
@@ -94,10 +107,12 @@ pub const VertexDescriptor = struct {
                             if (std.mem.indexOfScalar(u8, rest[1..], endC)) |end| {
                                 const inc2 = rest[1 .. 1 + end];
                                 const resolved2 = try common.resolveIncludePath(gpa, inc_path, inc2);
-                                // check visited
                                 var already = false;
                                 for (include_queue.items) |q| {
-                                    if (std.mem.eql(u8, q, resolved2)) { already = true; break; }
+                                    if (std.mem.eql(u8, q, resolved2)) {
+                                        already = true;
+                                        break;
+                                    }
                                 }
                                 if (!already) {
                                     try include_queue.append(gpa, resolved2);
@@ -109,19 +124,15 @@ pub const VertexDescriptor = struct {
                         }
                     }
                 }
-            } else {
-                // could not read, ignore
-            }
+            } else {}
         }
 
-        // Build combined source for struct parsing: concatenate all include contents + raw_main (with includes stripped)
         var combined = std.ArrayList(u8).empty;
         defer combined.deinit(gpa);
         for (include_contents.items) |c| {
             try combined.appendSlice(gpa, c);
             try combined.append(gpa, '\n');
         }
-        // For raw_main, strip #include lines before appending (so they don't interfere)
         {
             var line_it = std.mem.splitScalar(u8, raw_main, '\n');
             while (line_it.next()) |line| {
@@ -140,7 +151,6 @@ pub const VertexDescriptor = struct {
         const structs = try common.parseStructs(gpa, no_comments);
         defer common.freeStructs(gpa, structs);
 
-        // For vertex inputs, we need source without layouts but also without include-structs? Use main-only source stripped?
         const main_no_comments = try common.stripComments(gpa, raw_main);
         defer gpa.free(main_no_comments);
         const stripped_for_ins = try common.stripLayouts(gpa, main_no_comments);
@@ -151,16 +161,13 @@ pub const VertexDescriptor = struct {
         const uniforms = try common.parseUniforms(gpa, no_comments);
         defer common.freeUniforms(gpa, uniforms);
 
-        // Build code
         var inner = std.ArrayList(u8).empty;
         defer inner.deinit(gpa);
 
-        // Helper to map uniform type already: we will need struct map for quick lookup
         var struct_map = std.StringHashMap(void).init(gpa);
         defer struct_map.deinit();
         for (structs) |s| try struct_map.put(s.name, {});
 
-        // Emit structs from includes + main (as sibling consts)
         if (structs.len > 0) {
             for (structs) |s| {
                 try inner.appendSlice(gpa, "    pub const ");
@@ -192,13 +199,10 @@ pub const VertexDescriptor = struct {
             try inner.appendSlice(gpa, "\n");
         }
 
-        // Also emit auxiliary structs for uniform blocks that are not already in structs map
-        // Collect block structs to emit if not already defined
         for (uniforms) |u| {
             if (u.kind == .block) {
                 const block_type = u.glsl_type;
                 if (!struct_map.contains(block_type)) {
-                    // Define block struct from its fields
                     try inner.appendSlice(gpa, "    pub const ");
                     try inner.appendSlice(gpa, block_type);
                     try inner.appendSlice(gpa, " = struct {\n");
@@ -231,7 +235,6 @@ pub const VertexDescriptor = struct {
         }
         if (structs.len > 0 or blk_has(uniforms)) try inner.appendSlice(gpa, "\n");
 
-        // Vertex
         if (ins.len == 0) {
             try inner.appendSlice(gpa, "    pub const Vertex = struct {};\n");
         } else {
@@ -249,7 +252,6 @@ pub const VertexDescriptor = struct {
         }
         try inner.appendSlice(gpa, "\n");
 
-        // Uniform
         if (uniforms.len == 0) {
             try inner.appendSlice(gpa, "    pub const Uniform = struct {};\n");
         } else {
@@ -257,17 +259,12 @@ pub const VertexDescriptor = struct {
             for (uniforms) |u| {
                 const zig_type_raw: []u8 = blk: {
                     if (u.kind == .block) {
-                        // UBO -> Buffer(BlockType)
                         const inner_t = try common.mapGLSLTypeToZig(gpa, u.glsl_type);
                         defer gpa.free(inner_t);
-                        // inner_t is e.g., "Matrices" or mapped; but for block we want struct name as is, not mapped math
-                        // For block, glsl_type is block name, which is already struct name; map will return same name
-                        // So we can do Buffer(BlockType)
                         break :blk try std.fmt.allocPrint(gpa, "@import(\"gl_graphics\").Buffer({s})", .{inner_t});
                     } else if (u.is_sampler) {
-                        break :blk try gpa.dupe(u8, "@import(\"gl_graphics\").Texture");
+                        break :blk try gpa.dupe(u8, "*const @import(\"gl_graphics\").Texture");
                     } else {
-                        // Check if uniform type is known struct -> keep as is, else map
                         if (struct_map.contains(u.glsl_type)) {
                             break :blk try gpa.dupe(u8, u.glsl_type);
                         } else {
@@ -276,9 +273,6 @@ pub const VertexDescriptor = struct {
                     }
                 };
                 defer gpa.free(zig_type_raw);
-                // Handle array uniforms: if uniform is array, wrap as [len]Type or []Type
-                // Our UniformDef doesn't store array length; but parseUniforms currently doesn't capture array len.
-                // So just emit as single.
                 try inner.appendSlice(gpa, "        ");
                 try inner.appendSlice(gpa, u.name);
                 try inner.appendSlice(gpa, ": ");
@@ -289,7 +283,6 @@ pub const VertexDescriptor = struct {
         }
         try inner.appendSlice(gpa, "\n");
 
-        // IdCache
         if (uniforms.len == 0) {
             try inner.appendSlice(gpa, "    pub const IdCache = struct {};\n");
         } else {
@@ -303,7 +296,6 @@ pub const VertexDescriptor = struct {
         }
         try inner.appendSlice(gpa, "\n");
 
-        // id and id_cache vars
         try inner.appendSlice(gpa, "    pub var id: u32 = 0;\n");
         if (uniforms.len == 0) {
             try inner.appendSlice(gpa, "    pub var id_cache: IdCache = .{};\n");
@@ -318,11 +310,9 @@ pub const VertexDescriptor = struct {
         }
         try inner.appendSlice(gpa, "    var _initialized: bool = false;\n\n");
 
-        // Editor
         try inner.appendSlice(gpa, "    pub const Editor = struct {\n");
         try inner.appendSlice(gpa, "        _program: u32,\n");
         try inner.appendSlice(gpa, "        _pending: Uniform = undefined,\n");
-        // Dirty as struct of bools
         if (uniforms.len == 0) {
             try inner.appendSlice(gpa, "        _dirty: struct {} = .{},\n");
         } else {
@@ -338,14 +328,13 @@ pub const VertexDescriptor = struct {
         try inner.appendSlice(gpa, "        pub fn init(program: u32) Editor { return .{ ._program = program }; }\n");
         try inner.appendSlice(gpa, "        pub fn setUniform(self: *const Editor, uniform: Uniform) *const Editor { @constCast(self)._pending = uniform; @constCast(self)._set_all = true; return @constCast(self); }\n");
         for (uniforms) |u| {
-            // Map zig type for param
             const zig_param_type: []u8 = blk: {
                 if (u.kind == .block) {
                     const inner_t = try common.mapGLSLTypeToZig(gpa, u.glsl_type);
                     defer gpa.free(inner_t);
                     break :blk try std.fmt.allocPrint(gpa, "@import(\"gl_graphics\").Buffer({s})", .{inner_t});
                 } else if (u.is_sampler) {
-                    break :blk try gpa.dupe(u8, "@import(\"gl_graphics\").Texture");
+                    break :blk try gpa.dupe(u8, "*const @import(\"gl_graphics\").Texture");
                 } else {
                     if (struct_map.contains(u.glsl_type)) {
                         break :blk try gpa.dupe(u8, u.glsl_type);
@@ -363,8 +352,6 @@ pub const VertexDescriptor = struct {
         try inner.appendSlice(gpa, "        pub fn apply(self: *const Editor) void {\n");
         try inner.appendSlice(gpa, "            const mut = @constCast(self);\n");
         try inner.appendSlice(gpa, "            const gl = @import(\"gl_graphics\").gl;\n");
-        // For sampler we need texture unit management; generate per uniform handling with reflection?
-        // We'll generate reflective loop with comptime.
         try inner.appendSlice(gpa, "            inline for (@typeInfo(Uniform).@\"struct\".fields) |field| {\n");
         try inner.appendSlice(gpa, "                const name = field.name;\n");
         try inner.appendSlice(gpa, "                const is_dirty = if (self._set_all) true else @field(self._dirty, name);\n");
@@ -372,16 +359,13 @@ pub const VertexDescriptor = struct {
         try inner.appendSlice(gpa, "                if (is_dirty and loc != -1) {\n");
         try inner.appendSlice(gpa, "                const value = @field(self._pending, name);\n");
         try inner.appendSlice(gpa, "                const T = @TypeOf(value);\n");
-        // Dispatch with if chain — we need to handle common types generically via inline dispatch helper
-        // For now we emit placeholder handling for f32/vec/mat/texture/buffer
         try inner.appendSlice(gpa, "                // Dispatch upload based on type — handles math, Texture, Buffer\n");
-        try inner.appendSlice(gpa, "                if (T == @import(\"gl_graphics\").Texture) {\n");
-        try inner.appendSlice(gpa, "                    const unit: u32 = 0; // TODO: assign texture unit tracking\n");
+        try inner.appendSlice(gpa, "                if (T == @import(\"gl_graphics\").Texture or T == *const @import(\"gl_graphics\").Texture or T == *@import(\"gl_graphics\").Texture) {\n");
+        try inner.appendSlice(gpa, "                    const unit: u32 = 0;\n");
         try inner.appendSlice(gpa, "                    @import(\"gl_graphics\").gl.textures.activeTexture(@enumFromInt(@intFromEnum(@import(\"gl_graphics\").gl.textures.TextureUnit.texture0) + unit));\n");
         try inner.appendSlice(gpa, "                    @import(\"gl_graphics\").gl.textures.bind(.texture_2d, value.getId());\n");
         try inner.appendSlice(gpa, "                    gl.uniforms.uniform1i(loc, @intCast(unit));\n");
         try inner.appendSlice(gpa, "                } else if (@typeInfo(T) == .@\"struct\" and @hasDecl(T, \"len\") and @hasDecl(T, \"value_type\")) {\n");
-        try inner.appendSlice(gpa, "                    // Vec\n");
         try inner.appendSlice(gpa, "                    if (T.value_type == f32) {\n");
         try inner.appendSlice(gpa, "                        if (T.len == 1) gl.uniforms.uniform1f(loc, value.v[0]) else if (T.len == 2) gl.uniforms.uniform2f(loc, value.v[0], value.v[1]) else if (T.len == 3) gl.uniforms.uniform3f(loc, value.v[0], value.v[1], value.v[2]) else if (T.len == 4) gl.uniforms.uniform4f(loc, value.v[0], value.v[1], value.v[2], value.v[3]) else {}\n");
         try inner.appendSlice(gpa, "                    } else if (T.value_type == i32) {\n");
@@ -414,6 +398,22 @@ pub const VertexDescriptor = struct {
         try inner.appendSlice(gpa, "                            }\n");
         try inner.appendSlice(gpa, "                        }\n");
         try inner.appendSlice(gpa, "                        gl.uniforms.uniformMatrix2fv(loc, false, &data);\n");
+        try inner.appendSlice(gpa, "                    } else if (T.cols == 3 and T.rows == 2) {\n");
+        try inner.appendSlice(gpa, "                        var data: [6]f32 = undefined;\n");
+        try inner.appendSlice(gpa, "                        inline for (0..3) |c| {\n");
+        try inner.appendSlice(gpa, "                            inline for (0..2) |r| {\n");
+        try inner.appendSlice(gpa, "                                data[c * 2 + r] = value.data[c].v[r];\n");
+        try inner.appendSlice(gpa, "                            }\n");
+        try inner.appendSlice(gpa, "                        }\n");
+        try inner.appendSlice(gpa, "                        gl.uniforms.uniformMatrix3x2fv(loc, false, &data);\n");
+        try inner.appendSlice(gpa, "                    } else if (T.cols == 2 and T.rows == 3) {\n");
+        try inner.appendSlice(gpa, "                        var data: [6]f32 = undefined;\n");
+        try inner.appendSlice(gpa, "                        inline for (0..2) |c| {\n");
+        try inner.appendSlice(gpa, "                            inline for (0..3) |r| {\n");
+        try inner.appendSlice(gpa, "                                data[c * 3 + r] = value.data[c].v[r];\n");
+        try inner.appendSlice(gpa, "                            }\n");
+        try inner.appendSlice(gpa, "                        }\n");
+        try inner.appendSlice(gpa, "                        gl.uniforms.uniformMatrix2x3fv(loc, false, &data);\n");
         try inner.appendSlice(gpa, "                    }\n");
         try inner.appendSlice(gpa, "                } else if (T == f32) {\n");
         try inner.appendSlice(gpa, "                    gl.uniforms.uniform1f(loc, value);\n");
@@ -431,7 +431,6 @@ pub const VertexDescriptor = struct {
         try inner.appendSlice(gpa, "        }\n");
         try inner.appendSlice(gpa, "    };\n\n");
 
-        // instance, dispose, edit
         try inner.appendSlice(gpa, "    pub fn instance() u32 {\n");
         try inner.appendSlice(gpa, "        if (_initialized and id != 0) return id;\n");
         try inner.appendSlice(gpa, "        const gl = @import(\"gl_graphics\").gl;\n");
@@ -468,11 +467,19 @@ pub const VertexDescriptor = struct {
         return outer;
     }
 
+    /// Returns a Descriptor vtable for this vertex descriptor.
+    /// Parameters:
+    /// - self: pointer to descriptor instance.
+    /// Returns: Descriptor with vtable.
     pub fn descriptor(self: *VertexDescriptor) Descriptor {
         return .{ .ptr = self, .vtable = .{ .get_code = getCode, .is_suitable_data = isSuitableData } };
     }
 };
 
+/// Returns true when any uniform is a block type.
+/// Parameters:
+/// - uniforms: slice of uniform definitions.
+/// Returns: true if any block uniform exists.
 fn blk_has(uniforms: []common.UniformDef) bool {
     for (uniforms) |u| if (u.kind == .block) return true;
     return false;

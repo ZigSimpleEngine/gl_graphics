@@ -1,5 +1,12 @@
 const std = @import("std");
 
+pub const gl_descriptors = struct {
+    pub const VertexDescriptor = @import("src/descriptors/vert.zig").VertexDescriptor;
+    pub const FragmentDescriptor = @import("src/descriptors/frag.zig").FragmentDescriptor;
+    pub const GlslDescriptor = @import("src/descriptors/glsl.zig").GlslDescriptor;
+    pub const Common = @import("src/descriptors/common.zig");
+};
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});

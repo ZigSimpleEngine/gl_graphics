@@ -173,7 +173,9 @@ pub const VertexDescriptor = struct {
         if (structs.len > 0 or blk_has(uniforms)) try inner.appendSlice(gpa, "\n");
 
         if (ins.len == 0) {
-            try inner.appendSlice(gpa, "    pub const Vertex = struct {};\n");
+            try inner.appendSlice(gpa, "    pub const Vertex = struct {\n");
+            try inner.appendSlice(gpa, "        pub const SOA = struct {};\n");
+            try inner.appendSlice(gpa, "    };\n");
         } else {
             try inner.appendSlice(gpa, "    pub const Vertex = struct {\n");
             for (ins) |f| {
@@ -185,6 +187,19 @@ pub const VertexDescriptor = struct {
                 try inner.appendSlice(gpa, zig_type);
                 try inner.appendSlice(gpa, ",\n");
             }
+            // SOA struct of arrays: same fields but as slices
+            try inner.appendSlice(gpa, "\n");
+            try inner.appendSlice(gpa, "        pub const SOA = struct {\n");
+            for (ins) |f| {
+                const zig_type = try common.mapGLSLTypeToZig(gpa, f.typ);
+                defer gpa.free(zig_type);
+                try inner.appendSlice(gpa, "            ");
+                try inner.appendSlice(gpa, f.name);
+                try inner.appendSlice(gpa, ": []const ");
+                try inner.appendSlice(gpa, zig_type);
+                try inner.appendSlice(gpa, ",\n");
+            }
+            try inner.appendSlice(gpa, "        };\n");
             try inner.appendSlice(gpa, "    };\n");
         }
         try inner.appendSlice(gpa, "\n");

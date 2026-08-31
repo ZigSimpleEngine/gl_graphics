@@ -208,6 +208,25 @@ test "mesh editor chain const" {
     mesh.edit().setVertices(verts[0..]).setIndices(inds[0..]).apply();
 }
 
+test "mesh editor soa chain" {
+    const V = struct {
+        pos: math.Vec(3, f32),
+        normal: math.Vec(3, f32),
+        uv: math.Vec(2, f32),
+    };
+    const M = Mesh(u16, V);
+    const gpa = std.testing.allocator;
+    const mesh = try M.create(gpa);
+    defer mesh.destroy(gpa);
+    const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).init(.{ 0, 0, 0 }), math.Vec(3, f32).init(.{ 1, 0, 0 }) };
+    const normal = [_]math.Vec(3, f32){ math.Vec(3, f32).init(.{ 0, 0, 1 }), math.Vec(3, f32).init(.{ 0, 0, 1 }) };
+    const uv = [_]math.Vec(2, f32){ math.Vec(2, f32).init(.{ 0, 0 }), math.Vec(2, f32).init(.{ 1, 1 }) };
+    const inds = [_]u16{ 0, 1, 0 };
+    mesh.edit().setVerticesSOA(.{ .pos = pos[0..], .normal = normal[0..], .uv = uv[0..] }).setIndices(inds[0..]).apply();
+    try std.testing.expect(mesh.getVertexCount() == 2);
+    try std.testing.expect(mesh.getIndexCount() == 3);
+}
+
 test "texture editor chain const" {
     const gpa = std.testing.allocator;
     const tex = try Texture.create(gpa);

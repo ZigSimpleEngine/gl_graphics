@@ -79,6 +79,66 @@ fn computeLayout(comptime Vertex: type) []const AttribInfo {
     return infos;
 }
 
+/// Number of top-level fields in the vertex struct (each becomes one SOA VBO).
+fn fieldCount(comptime Vertex: type) usize {
+    return @typeInfo(Vertex).@"struct".fields.len;
+}
+
+/// Byte stride between consecutive elements of a vertex field when stored tightly
+/// as a plain SOA array: `@sizeOf(FieldType)` for vectors/scalars/arrays, and the
+/// full matrix element size (so column attributes advance between matrices).
+fn fieldElemStride(comptime FieldType: type) i32 {
+    return @intCast(@sizeOf(FieldType));
+}
+
+/// Number of GL attribute locations a single vertex field expands to.
+/// Mirrors the branch logic of `computeLayout`.
+fn fieldAttribCount(comptime FieldType: type) usize {
+    if (@typeInfo(FieldType) == .@"struct" and @hasDecl(FieldType, "len") and @hasDecl(FieldType, "value_type")) {
+        return 1;
+    } else if (@typeInfo(FieldType) == .@"struct" and @hasDecl(FieldType, "cols") and @hasDecl(FieldType, "rows")) {
+        return FieldType.cols;
+    } else if (@typeInfo(FieldType) == .array) {
+        return 1;
+    } else if (@typeInfo(FieldType) == .int or @typeInfo(FieldType) == .float or FieldType == bool) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+/// Maps a GL attribute location index (as produced by `computeLayout`) back to the
+/// source vertex field index and the byte offset of the column within a matrix field.
+const FieldSlot = struct {
+    field_index: usize,
+    field_type: type,
+    column_offset: usize,
+};
+fn computeFieldSlots(comptime Vertex: type) [computeLayout(Vertex).len]FieldSlot {
+    const fields = @typeInfo(Vertex).@"struct".fields;
+    var slots: [computeLayout(Vertex).len]FieldSlot = undefined;
+    var slot_i: usize = 0;
+    inline for (fields, 0..) |field, fi| {
+        const FT = field.type;
+        if (@typeInfo(FT) == .@"struct" and @hasDecl(FT, "len") and @hasDecl(FT, "value_type")) {
+            slots[slot_i] = .{ .field_index = fi, .field_type = FT, .column_offset = 0 };
+            slot_i += 1;
+        } else if (@typeInfo(FT) == .@"struct" and @hasDecl(FT, "cols") and @hasDecl(FT, "rows")) {
+            for (0..FT.cols) |c| {
+                slots[slot_i] = .{ .field_index = fi, .field_type = FT, .column_offset = c * @sizeOf(FT.col_type) };
+                slot_i += 1;
+            }
+        } else if (@typeInfo(FT) == .int or @typeInfo(FT) == .float or FT == bool) {
+            slots[slot_i] = .{ .field_index = fi, .field_type = FT, .column_offset = 0 };
+            slot_i += 1;
+        } else if (@typeInfo(FT) == .array) {
+            slots[slot_i] = .{ .field_index = fi, .field_type = FT, .column_offset = 0 };
+            slot_i += 1;
+        }
+    }
+    return slots;
+}
+
 /// Maps a mesh index type to the corresponding OpenGL element type.
 /// Parameters:
 /// - `Index`: Index element type. Supported: `u8`, `u16`, `u32`, `i16`, `i32`.
@@ -99,13 +159,17 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
     switch (@typeInfo(Vertex)) { .@"struct" => {}, else => @compileError("Mesh Vertex must be struct") }
     const layout = comptime computeLayout(Vertex);
     const index_gl_type = comptime indexGLType(Index);
+    const field_count = comptime fieldCount(Vertex);
+    const field_slots = comptime computeFieldSlots(Vertex);
     const Impl = struct {
         /// Vertex array object handle.
         vao: u32 = 0,
-        /// Vertex buffer object handle.
+        /// Vertex buffer object handle (used for interleaved AOS layout).
         vbo: u32 = 0,
         /// Element buffer object handle.
         ebo: u32 = 0,
+        /// One VBO per vertex field, used for split (SOA) layout. 0 = not created.
+        field_vbos: [field_count]u32 = .{0} ** field_count,
         /// Number of vertices currently stored.
         vertex_count: usize = 0,
         /// Number of indices currently stored.
@@ -116,6 +180,8 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
         vertex_usage: gl.buffers.BufferUsage = .static_draw,
         /// Buffer usage hint for index data.
         index_usage: gl.buffers.BufferUsage = .static_draw,
+        /// Whether the mesh is currently configured with split (SOA) vertex buffers.
+        using_soa: bool = false,
         /// Whether GL objects have been initialized.
         initialized: bool = false,
     };
@@ -180,9 +246,17 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
         /// Returns: `void`.
         pub fn destroy(self: *@This(), allocator: std.mem.Allocator) void {
             const m = self.impl();
-            if (gl.loader.loaded() and m.ebo != 0) gl.buffers.delete(1, @ptrCast(&m.ebo));
-            if (gl.loader.loaded() and m.vbo != 0) gl.buffers.delete(1, @ptrCast(&m.vbo));
-            if (gl.loader.loaded() and m.vao != 0) gl.vertex_arrays.delete(1, @ptrCast(&m.vao));
+            if (gl.loader.loaded()) {
+                if (m.ebo != 0) gl.buffers.delete(1, @ptrCast(&m.ebo));
+                if (m.vbo != 0) gl.buffers.delete(1, @ptrCast(&m.vbo));
+                inline for (0..field_count) |i| {
+                    if (m.field_vbos[i] != 0) {
+                        var id = m.field_vbos[i];
+                        gl.buffers.delete(1, @ptrCast(&id));
+                    }
+                }
+                if (m.vao != 0) gl.vertex_arrays.delete(1, @ptrCast(&m.vao));
+            }
             allocator.destroy(m);
         }
 
@@ -316,8 +390,14 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
         pub const Editor = struct {
             /// Target mesh being edited.
             _mesh: *Self,
-            /// Pending vertex slice to upload.
+            /// Pending vertex slice to upload (interleaved AOS layout).
             _pending_vertices: ?[]const Vertex = null,
+            /// True when pending vertices are supplied as split (SOA) per-field slices.
+            _using_soa: bool = false,
+            /// Pending per-field raw byte slices (only valid when `_using_soa`).
+            _pending_soa_fields: [field_count]?[]const u8 = .{null} ** field_count,
+            /// Number of vertices in the pending SOA data.
+            _pending_soa_count: usize = 0,
             /// Pending index slice to upload.
             _pending_indices: ?[]const Index = null,
             /// Pending external vertex buffer handle override.
@@ -339,12 +419,68 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
             /// Returns: Initialized `Editor`.
             pub fn init(mesh: *Self) Editor { return .{ ._mesh = mesh }; }
 
-            /// Queues vertex data for upload.
+            /// Queues vertex data for upload (interleaved AOS layout).
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `vertices`: Slice of vertices to upload.
             /// Returns: `*const Editor` for chaining.
-            pub fn setVertices(self: *const Editor, vertices: []const Vertex) *const Editor { @constCast(self)._pending_vertices = vertices; return @constCast(self); }
+            pub fn setVertices(self: *const Editor, vertices: []const Vertex) *const Editor {
+                const mut = @constCast(self);
+                mut._using_soa = false;
+                mut._pending_vertices = vertices;
+                return mut;
+            }
+
+            /// Queues vertex data in SOA (struct-of-arrays) form for upload.
+            /// Each vertex field is recorded as its own byte slice; no temporary
+            /// interleaved array is allocated and no GL calls are issued here. The
+            /// actual per-field VBO upload happens in `apply`.
+            /// Parameters:
+            /// - `self`: Editor instance.
+            /// - `soa`: Value of type Vertex.SOA containing per-attribute slices.
+            /// Returns: `*const Editor` for chaining.
+            pub fn setVerticesSOA(self: *const Editor, soa: anytype) *const Editor {
+                const mut = @constCast(self);
+                const SOA = @TypeOf(soa);
+                const soa_info = @typeInfo(SOA);
+                if (soa_info != .@"struct") @compileError("SOA must be a struct");
+                const vertex_info = @typeInfo(Vertex);
+                if (vertex_info != .@"struct") @compileError("Vertex must be a struct");
+                const vertex_fields = vertex_info.@"struct".fields;
+
+                // Reset any previous SOA pending state.
+                mut._using_soa = false;
+                mut._pending_vertices = null;
+                for (&mut._pending_soa_fields) |*slot| slot.* = null;
+                mut._pending_soa_count = 0;
+
+                // Determine element count from the first non-empty field.
+                var count: usize = 0;
+                const soa_fields = soa_info.@"struct".fields;
+                if (soa_fields.len > 0) {
+                    count = @field(soa, soa_fields[0].name).len;
+                    inline for (soa_fields) |f| {
+                        if (@field(soa, f.name).len != count) @panic("SOA fields length mismatch");
+                    }
+                }
+                if (count == 0) {
+                    mut._pending_soa_count = 0;
+                    mut._using_soa = true;
+                    return mut;
+                }
+
+                // Match each vertex field to its SOA slice and store raw bytes.
+                inline for (vertex_fields, 0..) |vf, fi| {
+                    if (@hasField(SOA, vf.name)) {
+                        const slice = @field(soa, vf.name);
+                        if (slice.len != count) @panic("SOA field length mismatch");
+                        mut._pending_soa_fields[fi] = std.mem.sliceAsBytes(slice);
+                    }
+                }
+                mut._pending_soa_count = count;
+                mut._using_soa = true;
+                return mut;
+            }
 
             /// Queues index data for upload.
             /// Parameters:
@@ -431,9 +567,15 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
                 if (@constCast(self)._pending_vertex_usage) |u| m.vertex_usage = u;
                 if (@constCast(self)._pending_index_usage) |u| m.index_usage = u;
                 if (loaded) gl.vertex_arrays.bind(m.vao);
-                if (@constCast(self)._pending_vertex_buffer) |vbo_id| {
+
+                if (@constCast(self)._using_soa) {
+                    // Upload each vertex field into its own VBO, then configure
+                    // attribute pointers against those dedicated buffers.
+                    applySOA(self);
+                } else if (@constCast(self)._pending_vertex_buffer) |vbo_id| {
                     if (loaded) gl.buffers.bind(.array_buffer, vbo_id);
                     m.vbo = vbo_id;
+                    m.using_soa = false;
                     if (@constCast(self)._pending_vertices) |verts| m.vertex_count = verts.len;
                     configureAttributes();
                 } else if (@constCast(self)._pending_vertices) |verts| {
@@ -441,6 +583,7 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
                     const bytes = std.mem.sliceAsBytes(verts);
                     if (loaded) gl.buffers.bufferData(.array_buffer, bytes.len, bytes.ptr, v_usage);
                     m.vertex_count = verts.len;
+                    m.using_soa = false;
                     configureAttributes();
                 }
                 if (@constCast(self)._pending_index_buffer) |ebo_id| {
@@ -457,7 +600,62 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
                 @constCast(self).* = Editor.init(@constCast(self)._mesh);
             }
 
-            /// Configures vertex attribute pointers from the compile-time layout.
+            /// Uploads pending SOA data: one dedicated VBO per vertex field, then
+            /// configures attribute pointers to read from those placed buffers.
+            /// Parameters: none (uses `_mesh`, `_pending_soa_fields`, `_pending_soa_count`).
+            /// Returns: `void`.
+            fn applySOA(self: *const Editor) void {
+                const m = @constCast(self)._mesh.impl();
+                const loaded = gl.loader.loaded();
+                const v_usage = @constCast(self)._pending_vertex_usage orelse m.vertex_usage;
+                m.vertex_count = @constCast(self)._pending_soa_count;
+                m.using_soa = true;
+
+                if (loaded) {
+                    // Create/upload a VBO per populated field.
+                    inline for (0..field_count) |fi| {
+                        const bytes = @constCast(self)._pending_soa_fields[fi];
+                        if (bytes != null) {
+                            if (m.field_vbos[fi] == 0) {
+                                var id: u32 = 0;
+                                gl.buffers.gen(1, @ptrCast(&id));
+                                m.field_vbos[fi] = id;
+                            }
+                            gl.buffers.bind(.array_buffer, m.field_vbos[fi]);
+                            gl.buffers.bufferData(.array_buffer, bytes.?.len, bytes.?.ptr, v_usage);
+                        }
+                    }
+                }
+
+                configureAttributesSOA(self);
+            }
+
+            /// Configures attribute pointers for the split (SOA) layout: each attribute
+            /// reads from its own VBO with a tight stride and no per-attribute offset.
+            /// Parameters: `self` (uses `_pending_soa_fields` and mesh `field_vbos`).
+            /// Returns: `void`.
+            fn configureAttributesSOA(self: *const Editor) void {
+                const loaded = gl.loader.loaded();
+                inline for (layout, 0..) |attr, li| {
+                    const slot = field_slots[li];
+                    const field_bytes = @constCast(self)._pending_soa_fields[slot.field_index];
+                    if (field_bytes != null) {
+                        if (loaded) gl.buffers.bind(.array_buffer, @constCast(self)._mesh.impl().field_vbos[slot.field_index]);
+                        const stride = fieldElemStride(slot.field_type);
+                        const ptr: ?*const anyopaque = @ptrFromInt(slot.column_offset);
+                        if (attr.is_integer) {
+                            if (loaded) gl.vertex_attributes.iPointer(attr.index, attr.size, attr.gl_type, stride, ptr);
+                        } else if (loaded) {
+                            gl.vertex_attributes.pointer(attr.index, attr.size, attr.gl_type, attr.normalized, stride, ptr);
+                        }
+                        if (loaded) gl.vertex_attributes.enable(attr.index);
+                        if (attr.divisor != 0) if (loaded) gl.vertex_attributes.divisor(attr.index, attr.divisor);
+                    }
+                }
+            }
+
+            /// Configures vertex attribute pointers from the compile-time layout
+            /// (interleaved AOS layout, single VBO).
             /// Parameters: none (uses outer `layout` and current VAO binding).
             /// Returns: `void`.
             fn configureAttributes() void {

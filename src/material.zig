@@ -63,14 +63,6 @@ pub fn Material(comptime shader_program_: type) type {
             m.* = .{ .fill_fn = fill_fn, .program = prog, .allocator = allocator };
             return @ptrCast(m);
         }
-        /// Alias for create with conventional init name.
-        /// Parameters:
-        /// - allocator: allocator for storage and program instance.
-        /// - fill_fn: optional fill callback.
-        /// Returns: pointer to created material.
-        pub fn init(allocator: std.mem.Allocator, fill_fn: ?*const fn (*Self) void) !*Self {
-            return create(allocator, fill_fn);
-        }
         /// Destroys the material and frees its storage.
         /// Parameters:
         /// - self: material to destroy.
@@ -78,14 +70,6 @@ pub fn Material(comptime shader_program_: type) type {
         /// Returns: void.
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
             allocator.destroy(self.impl());
-        }
-        /// Alias for destroy with conventional deinit name.
-        /// Parameters:
-        /// - self: material to deinitialize.
-        /// - allocator: allocator used for creation.
-        /// Returns: void.
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            self.destroy(allocator);
         }
 
         /// Returns a copy of the cached vertex uniform.

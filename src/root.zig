@@ -73,7 +73,7 @@ pub const core = @import("core");
 test "smoke — texture opaque + editor chain" {
     _ = Texture;
     _ = Buffer(u16);
-    _ = Mesh(u16, struct { pos: math.Vec(3, f32), uv: math.Vec(2, f32) });
+    _ = Mesh(struct { pos: math.Vec(3, f32), uv: math.Vec(2, f32) });
     _ = Transform(f32);
     _ = Map(.my_map, struct { a: i32 });
     const DummyVert = struct {
@@ -165,7 +165,7 @@ test "mesh layout compile" {
         texCoord: math.Vec(2, f32),
         normal: math.Vec(3, f32),
     };
-    const M = Mesh(u16, Vertex);
+    const M = Mesh(Vertex);
     try std.testing.expect(M.Layout.len == 3);
     try std.testing.expectEqual(@as(i32, 3), M.Layout[0].size);
     try std.testing.expectEqual(@as(i32, 2), M.Layout[1].size);
@@ -198,7 +198,7 @@ test "descriptor bake integration" {
 
 test "mesh editor chain const" {
     const V = struct { pos: math.Vec(3, f32) };
-    const M = Mesh(u16, V);
+    const M = Mesh(V);
     const gpa = std.testing.allocator;
     const mesh = try M.create(gpa);
     defer mesh.destroy(gpa);
@@ -214,7 +214,7 @@ test "mesh editor soa chain" {
         normal: math.Vec(3, f32),
         uv: math.Vec(2, f32),
     };
-    const M = Mesh(u16, V);
+    const M = Mesh(V);
     const gpa = std.testing.allocator;
     const mesh = try M.create(gpa);
     defer mesh.destroy(gpa);

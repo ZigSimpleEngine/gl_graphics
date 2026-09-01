@@ -76,20 +76,6 @@ pub fn Model(comptime material_: type, comptime mesh_: type, comptime scalar_typ
             return @ptrCast(m);
         }
 
-/// Alias for `create` for API uniformity.
-///
-/// Parameters:
-/// - `allocator` — parameter `allocator`.
-/// - `material` — parameter `material`.
-/// - `mesh` — parameter `mesh`.
-/// - `transform` — parameter `transform`.
-/// - `on_use_callback` — parameter `on_use_callback`.
-///
-/// Returns: `void)`.
-        pub fn init(allocator: std.mem.Allocator, material: *Material, mesh: *Mesh, transform: *TransformT, on_use_callback: ?*const fn (*Self) void) !*Self {
-            return create(allocator, material, mesh, transform, on_use_callback);
-        }
-
 /// Destroys the instance, freeing `Impl`.
 ///
 /// Parameters:
@@ -97,15 +83,6 @@ pub fn Model(comptime material_: type, comptime mesh_: type, comptime scalar_typ
 /// - `allocator` — parameter `allocator`.
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
             allocator.destroy(self.impl());
-        }
-
-/// Alias for `destroy` for RAII.
-///
-/// Parameters:
-/// - `self` — parameter `self`.
-/// - `allocator` — parameter `allocator`.
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            self.destroy(allocator);
         }
 
 /// Returns the material pointer.

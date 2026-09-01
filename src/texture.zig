@@ -103,15 +103,6 @@ pub const Texture = opaque {
         return @ptrCast(m);
     }
 
-    /// Alias for `create`. Creates a new texture object.
-    /// Parameters:
-    ///   - allocator: Allocator used to allocate the `Impl` structure.
-    /// Returns:
-    ///   - Pointer to the newly created `Texture`.
-    pub fn init(allocator: std.mem.Allocator) !*Texture {
-        return create(allocator);
-    }
-
     /// Destroys the texture object and frees its storage.
     /// Deletes the GL texture name if non-zero and destroys the `Impl` allocation.
     /// Parameters:
@@ -123,16 +114,6 @@ pub const Texture = opaque {
         const m = self.impl();
         if (gl.loader.loaded() and m.id != 0) gl.textures.delete(1, @ptrCast(&m.id));
         allocator.destroy(m);
-    }
-
-    /// Alias for `destroy`. Deinitializes the texture.
-    /// Parameters:
-    ///   - self: Texture to deinitialize.
-    ///   - allocator: Allocator that was used to create the texture.
-    /// Returns:
-    ///   - void.
-    pub fn deinit(self: *Texture, allocator: std.mem.Allocator) void {
-        self.destroy(allocator);
     }
 
     /// Checks whether the texture name corresponds to a valid GL texture.

@@ -1,4 +1,4 @@
-﻿const std = @import("std");
+const std = @import("std");
 const gl = @import("gl");
 const math = @import("math");
 
@@ -150,15 +150,14 @@ fn indexGLType(comptime Index: type) gl.enums.DataType {
     };
 }
 
-/// Creates a generic mesh type parameterized by index and vertex types.
+/// Creates a generic mesh type parameterized by vertex type.
+/// Index type is inferred from the slice passed to `setIndices`, avoiding conversions.
 /// Parameters:
-/// - `Index`: Index buffer element type.
 /// - `Vertex`: Vertex struct type defining layout.
 /// Returns: Opaque mesh type providing GPU resource management and draw API.
-pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
+pub fn Mesh(comptime Vertex: type) type {
     switch (@typeInfo(Vertex)) { .@"struct" => {}, else => @compileError("Mesh Vertex must be struct") }
     const layout = comptime computeLayout(Vertex);
-    const index_gl_type = comptime indexGLType(Index);
     const field_count = comptime fieldCount(Vertex);
     const field_slots = comptime computeFieldSlots(Vertex);
     const Impl = struct {
@@ -174,6 +173,8 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
         vertex_count: usize = 0,
         /// Number of indices currently stored.
         index_count: usize = 0,
+        /// OpenGL type for the current index buffer (determined from last setIndices).
+        index_gl_type: gl.enums.DataType = .unsigned_short,
         /// Primitive type used for drawing.
         primitive: gl.drawing.PrimitiveType = .triangles,
         /// Buffer usage hint for vertex data.
@@ -202,17 +203,31 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
         /// Returns: Const `*const Impl` pointer to internal data.
         inline fn implConst(self: *const Self) *const Impl { return @ptrCast(@alignCast(self)); }
 
-        /// Index element type for this mesh specialization.
-        pub const IndexType = Index;
-
         /// Vertex type for this mesh specialization.
         pub const VertexType = Vertex;
+
+        /// SOA form of `Vertex`: struct where each vertex field is represented as a slice.
+        /// Use as `Mesh.SOA` or `VertexType.SOA`-like via `Mesh.SOA`. Each field has type `[]const FieldType`.
+        pub const SOA = blk: {
+            const vfields = @typeInfo(Vertex).@"struct".fields;
+            var names: [vfields.len][]const u8 = undefined;
+            var types: [vfields.len]type = undefined;
+            var attrs: [vfields.len]std.builtin.Type.StructField.Attributes = undefined;
+            for (vfields, 0..) |vf, i| {
+                names[i] = vf.name;
+                types[i] = []const vf.type;
+                attrs[i] = .{};
+            }
+            break :blk @Struct(.auto, null, &names, &types, &attrs);
+        };
 
         /// Compile-time computed vertex attribute layout.
         pub const Layout = layout;
 
-        /// OpenGL data type for index elements.
-        pub const IndexGLType = index_gl_type;
+        /// Deprecated: Index type is now dynamic. Kept for compatibility as void.
+        pub const IndexType = void;
+        /// Deprecated: Index GL type is now dynamic per-mesh.
+        pub const IndexGLType = gl.enums.DataType.unsigned_short;
 
         /// Creates a new mesh with generated VAO, VBO and EBO.
         /// Parameters:
@@ -233,11 +248,19 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
             return @ptrCast(m);
         }
 
-        /// Alias for `create`.
+        /// Creates a new mesh and immediately initializes it from a SOA struct.
+        /// Convenience wrapper around `create` + `edit().setMeshSOA(...).apply()`.
+        /// Accepts the same struct as `setMeshSOA` (e.g. `instanceSOA` result with `position`/`uv`/`normal`/`indices`).
         /// Parameters:
-        /// - `allocator`: Allocator used to allocate internal storage.
-        /// Returns: Pointer to the newly created opaque mesh.
-        pub fn init(allocator: std.mem.Allocator) !*@This() { return create(allocator); }
+        /// - `allocator`: Allocator for mesh storage.
+        /// - `mesh_soa_data`: Struct with vertex slices and optional `indices`.
+        /// Returns: Pointer to the initialized mesh or allocation error.
+        pub fn createWithSOA(allocator: std.mem.Allocator, mesh_soa_data: anytype) !*@This() {
+            const self = try create(allocator);
+            errdefer self.destroy(allocator);
+            self.edit().setMeshSOA(mesh_soa_data).apply();
+            return self;
+        }
 
         /// Destroys the mesh and deletes associated GL objects.
         /// Parameters:
@@ -259,13 +282,6 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
             }
             allocator.destroy(m);
         }
-
-        /// Alias for `destroy`.
-        /// Parameters:
-        /// - `self`: Mesh to deinitialize.
-        /// - `allocator`: Allocator that created the mesh.
-        /// Returns: `void`.
-        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void { self.destroy(allocator); }
 
         /// Checks whether the mesh has valid initialized GL handles.
         /// Parameters:
@@ -311,9 +327,9 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
 
         /// Returns the OpenGL type for index elements.
         /// Parameters:
-        /// - `self`: Mesh instance (unused, kept for API symmetry).
+        /// - `self`: Mesh instance.
         /// Returns: `gl.enums.DataType` for indices.
-        pub fn getIndexType(_: *const @This()) gl.enums.DataType { return index_gl_type; }
+        pub fn getIndexType(self: *const @This()) gl.enums.DataType { return self.implConst().index_gl_type; }
 
         /// Returns the byte stride of a single vertex.
         /// Parameters:
@@ -364,7 +380,7 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
         pub fn draw(self: *const @This()) void {
             self.use();
             const m = self.implConst();
-            if (m.index_count > 0) gl.drawing.drawElements(m.primitive, @intCast(m.index_count), index_gl_type, null)
+            if (m.index_count > 0) gl.drawing.drawElements(m.primitive, @intCast(m.index_count), m.index_gl_type, null)
             else if (m.vertex_count > 0) gl.drawing.drawArrays(m.primitive, 0, @intCast(m.vertex_count));
         }
 
@@ -376,7 +392,7 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
         pub fn drawInstanced(self: *const @This(), instance_count: i32) void {
             self.use();
             const m = self.implConst();
-            if (m.index_count > 0) gl.drawing.drawElementsInstanced(m.primitive, @intCast(m.index_count), index_gl_type, null, instance_count)
+            if (m.index_count > 0) gl.drawing.drawElementsInstanced(m.primitive, @intCast(m.index_count), m.index_gl_type, null, instance_count)
             else gl.drawing.drawArraysInstanced(m.primitive, 0, @intCast(m.vertex_count), instance_count);
         }
 
@@ -398,8 +414,12 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
             _pending_soa_fields: [field_count]?[]const u8 = .{null} ** field_count,
             /// Number of vertices in the pending SOA data.
             _pending_soa_count: usize = 0,
-            /// Pending index slice to upload.
-            _pending_indices: ?[]const Index = null,
+            /// Pending index slice bytes to upload.
+            _pending_indices_bytes: ?[]const u8 = null,
+            /// Pending index GL type.
+            _pending_index_gl_type: ?gl.enums.DataType = null,
+            /// Pending index count.
+            _pending_index_count: usize = 0,
             /// Pending external vertex buffer handle override.
             _pending_vertex_buffer: ?u32 = null,
             /// Pending external index buffer handle override.
@@ -441,8 +461,8 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
             /// Returns: `*const Editor` for chaining.
             pub fn setVerticesSOA(self: *const Editor, soa: anytype) *const Editor {
                 const mut = @constCast(self);
-                const SOA = @TypeOf(soa);
-                const soa_info = @typeInfo(SOA);
+                const SoaT = @TypeOf(soa);
+                const soa_info = @typeInfo(SoaT);
                 if (soa_info != .@"struct") @compileError("SOA must be a struct");
                 const vertex_info = @typeInfo(Vertex);
                 if (vertex_info != .@"struct") @compileError("Vertex must be a struct");
@@ -471,7 +491,7 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
 
                 // Match each vertex field to its SOA slice and store raw bytes.
                 inline for (vertex_fields, 0..) |vf, fi| {
-                    if (@hasField(SOA, vf.name)) {
+                    if (@hasField(SoaT, vf.name)) {
                         const slice = @field(soa, vf.name);
                         if (slice.len != count) @panic("SOA field length mismatch");
                         mut._pending_soa_fields[fi] = std.mem.sliceAsBytes(slice);
@@ -482,12 +502,140 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
                 return mut;
             }
 
-            /// Queues index data for upload.
+            /// Queues vertex data in SOA form from an arbitrary source struct.
+            /// Performs comptime validation that every field of `Vertex` exists in `source` with matching element type.
+            /// Assembles a `VertexType.SOA`-like struct with exactly the vertex fields and forwards to `setVerticesSOA`.
             /// Parameters:
             /// - `self`: Editor instance.
-            /// - `indices`: Slice of indices to upload.
+            /// - `source`: Struct containing slices/arrays for each vertex attribute (may contain extra fields).
             /// Returns: `*const Editor` for chaining.
-            pub fn setIndices(self: *const Editor, indices: []const Index) *const Editor { @constCast(self)._pending_indices = indices; return @constCast(self); }
+            pub fn setVerticesSOA2(self: *const Editor, source: anytype) *const Editor {
+                const Source = @TypeOf(source);
+                const sInfo = @typeInfo(Source);
+                if (sInfo != .@"struct") @compileError("setVerticesSOA2: source must be a struct, got " ++ @typeName(Source));
+                const vInfo = @typeInfo(Vertex);
+
+                // exact name match, with comptime type check
+                inline for (vInfo.@"struct".fields) |vf| {
+                    if (@hasField(Source, vf.name)) {
+                        const SrcFieldType = @FieldType(Source, vf.name);
+                        const child = switch (@typeInfo(SrcFieldType)) {
+                            .pointer => |p| switch (p.size) {
+                                .slice => p.child,
+                                .one => switch (@typeInfo(p.child)) {
+                                    .array => |a| a.child,
+                                    else => @compileError("setVerticesSOA2: field '" ++ vf.name ++ "' must be a slice or array, got " ++ @typeName(SrcFieldType)),
+                                },
+                                else => @compileError("setVerticesSOA2: field '" ++ vf.name ++ "' must be a slice or array, got " ++ @typeName(SrcFieldType)),
+                            },
+                            .array => |a| a.child,
+                            else => @compileError("setVerticesSOA2: field '" ++ vf.name ++ "' must be a slice or array, got " ++ @typeName(SrcFieldType)),
+                        };
+                        if (child != vf.type) {
+                            @compileError("setVerticesSOA2: field '" ++ vf.name ++ "' element type mismatch: expected " ++ @typeName(vf.type) ++ ", got " ++ @typeName(child) ++ " (field type " ++ @typeName(SrcFieldType) ++ ")");
+                        }
+                    }
+                }
+                const CustomSOA = comptime blk: {
+                    var present: usize = 0;
+                    for (vInfo.@"struct".fields) |vf| {
+                        if (@hasField(Source, vf.name)) present += 1;
+                    }
+                    var names: [present][]const u8 = undefined;
+                    var types: [present]type = undefined;
+                    var attrs: [present]std.builtin.Type.StructField.Attributes = undefined;
+                    var idx: usize = 0;
+                    for (vInfo.@"struct".fields) |vf| {
+                        if (@hasField(Source, vf.name)) {
+                            names[idx] = vf.name;
+                            types[idx] = []const vf.type;
+                            attrs[idx] = .{};
+                            idx += 1;
+                        }
+                    }
+                    break :blk @Struct(.auto, null, &names, &types, &attrs);
+                };
+                var soa: CustomSOA = undefined;
+                inline for (vInfo.@"struct".fields) |vf| {
+                    if (@hasField(Source, vf.name)) {
+                        const SrcFT = @FieldType(Source, vf.name);
+                        const info = @typeInfo(SrcFT);
+                        if (info == .array) {
+                            @field(soa, vf.name) = &@field(source, vf.name);
+                        } else if (info == .pointer and info.pointer.size == .one and @typeInfo(info.pointer.child) == .array) {
+                            @field(soa, vf.name) = @field(source, vf.name)[0..];
+                        } else {
+                            @field(soa, vf.name) = @field(source, vf.name);
+                        }
+                    }
+                }
+                return self.setVerticesSOA(soa);
+            }
+
+            /// Queues index data for upload. Index type is inferred from the slice element type.
+            /// Parameters:
+            /// - `self`: Editor instance.
+            /// - `indices`: Slice or array of indices (`[]const u8`/`u16`/`u32` etc., also `[N]T` or `*const [N]T`).
+            /// Returns: `*const Editor` for chaining.
+            pub fn setIndices(self: *const Editor, indices: anytype) *const Editor {
+                const Indices = @TypeOf(indices);
+                const Child = switch (@typeInfo(Indices)) {
+                    .pointer => |p| switch (p.size) {
+                        .slice => p.child,
+                        .one => switch (@typeInfo(p.child)) {
+                            .array => |a| a.child,
+                            else => @compileError("setIndices expects a slice or array, got " ++ @typeName(Indices)),
+                        },
+                        else => @compileError("setIndices expects a slice or array, got " ++ @typeName(Indices)),
+                    },
+                    .array => |a| a.child,
+                    else => @compileError("setIndices expects a slice or array, got " ++ @typeName(Indices)),
+                };
+                const gl_type = indexGLType(Child);
+                const mut = @constCast(self);
+                const bytes: []const u8 = switch (@typeInfo(Indices)) {
+                    .pointer => |p| switch (p.size) {
+                        .slice => std.mem.sliceAsBytes(indices),
+                        .one => std.mem.sliceAsBytes(indices[0..]),
+                        else => unreachable,
+                    },
+                    .array => blk: {
+                        const slice: []const Child = &indices;
+                        break :blk std.mem.sliceAsBytes(slice);
+                    },
+                    else => unreachable,
+                };
+                const count: usize = switch (@typeInfo(Indices)) {
+                    .pointer => |p| switch (p.size) {
+                        .slice => indices.len,
+                        .one => indices.len,
+                        else => unreachable,
+                    },
+                    .array => @typeInfo(Indices).array.len,
+                    else => unreachable,
+                };
+                mut._pending_indices_bytes = bytes;
+                mut._pending_index_gl_type = gl_type;
+                mut._pending_index_count = count;
+                return mut;
+            }
+
+            /// Queues both vertex and index data from a single mesh SOA struct.
+            /// Accepts the same struct as `setVerticesSOA2` (e.g. wavefront_obj's `instanceSOA` result) which contains vertex attributes (`position`, `normal`, `uv`, etc.) plus optional `indices`.
+            /// Vertex attributes are forwarded to `setVerticesSOA2`; if `indices` field exists it is forwarded to `setIndices`.
+            /// Parameters:
+            /// - `self`: Editor instance.
+            /// - `mesh_data_soa`: Struct with vertex slices and optional `indices` slice/array.
+            /// Returns: `*const Editor` for chaining.
+            pub fn setMeshSOA(self: *const Editor, mesh_data_soa: anytype) *const Editor {
+                const Data = @TypeOf(mesh_data_soa);
+                if (@typeInfo(Data) != .@"struct") @compileError("setMeshSOA expects a struct, got " ++ @typeName(Data));
+                _ = self.setVerticesSOA2(mesh_data_soa);
+                if (@hasField(Data, "indices")) {
+                    _ = self.setIndices(@field(mesh_data_soa, "indices"));
+                }
+                return self;
+            }
 
             /// Overrides the vertex buffer handle.
             /// Parameters:
@@ -589,12 +737,15 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
                 if (@constCast(self)._pending_index_buffer) |ebo_id| {
                     if (loaded) gl.buffers.bind(.element_array_buffer, ebo_id);
                     m.ebo = ebo_id;
-                    if (@constCast(self)._pending_indices) |inds| m.index_count = inds.len;
-                } else if (@constCast(self)._pending_indices) |inds| {
+                    if (@constCast(self)._pending_indices_bytes) |_| {
+                        m.index_count = @constCast(self)._pending_index_count;
+                        if (@constCast(self)._pending_index_gl_type) |t| m.index_gl_type = t;
+                    }
+                } else if (@constCast(self)._pending_indices_bytes) |bytes| {
                     if (loaded) gl.buffers.bind(.element_array_buffer, m.ebo);
-                    const bytes = std.mem.sliceAsBytes(inds);
                     if (loaded) gl.buffers.bufferData(.element_array_buffer, bytes.len, bytes.ptr, i_usage);
-                    m.index_count = inds.len;
+                    m.index_count = @constCast(self)._pending_index_count;
+                    if (@constCast(self)._pending_index_gl_type) |t| m.index_gl_type = t;
                 }
                 if (@constCast(self)._pending_divisors) |divs| for (divs) |d| if (loaded) gl.vertex_attributes.divisor(d.index, d.divisor);
                 @constCast(self).* = Editor.init(@constCast(self)._mesh);
@@ -672,4 +823,100 @@ pub fn Mesh(comptime Index: type, comptime Vertex: type) type {
             }
         };
     };
+}
+
+test "mesh editor soa2 basic and extra fields" {
+    const V = struct { pos: math.Vec(3, f32), uv: math.Vec(2, f32) };
+    const M = Mesh(V);
+    const gpa = std.testing.allocator;
+    const mesh = try M.create(gpa);
+    defer mesh.destroy(gpa);
+    const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 0, 0 }) };
+    const uv = [_]math.Vec(2, f32){ math.Vec(2, f32).init(.{ 0, 0 }), math.Vec(2, f32).init(.{ 1, 1 }) };
+    // source with extra field should be accepted, extra ignored
+    const src = .{ .pos = pos[0..], .uv = uv[0..], .extra = @as(i32, 5) };
+    mesh.edit().setVerticesSOA2(src).apply();
+    try std.testing.expect(mesh.getVertexCount() == 2);
+    // verify SOA type exists and matches expected
+    _ = M.SOA;
+    try std.testing.expect(@hasField(M.SOA, "pos"));
+    try std.testing.expect(@hasField(M.SOA, "uv"));
+}
+
+test "mesh editor soa2 delegates to soa" {
+    const V = struct { aPos: math.Vec(3, f32), aNormal: math.Vec(3, f32) };
+    const M = Mesh(V);
+    const gpa = std.testing.allocator;
+    const mesh = try M.create(gpa);
+    defer mesh.destroy(gpa);
+    const aPos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 2, 3 }) };
+    const aNormal = [_]math.Vec(3, f32){ math.Vec(3, f32).init(.{ 0, 0, 1 }), math.Vec(3, f32).init(.{ 0, 1, 0 }) };
+    const src = .{ .aPos = aPos[0..], .aNormal = aNormal[0..] };
+    mesh.edit().setVerticesSOA2(src).apply();
+    try std.testing.expect(mesh.getVertexCount() == 2);
+    // direct soa should give same result
+    const mesh2 = try M.create(gpa);
+    defer mesh2.destroy(gpa);
+    mesh2.edit().setVerticesSOA(.{ .aPos = aPos[0..], .aNormal = aNormal[0..] }).apply();
+    try std.testing.expect(mesh2.getVertexCount() == 2);
+}
+
+test "mesh editor soa2 exact match with shader names" {
+    const V = struct { position: math.Vec(3, f32), normal: math.Vec(3, f32), uv: math.Vec(2, f32) };
+    const M = Mesh(V);
+    const gpa = std.testing.allocator;
+    const mesh = try M.create(gpa);
+    defer mesh.destroy(gpa);
+    const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 0, 0 }) };
+    const nrm = [_]math.Vec(3, f32){ math.Vec(3, f32).init(.{ 0, 0, 1 }), math.Vec(3, f32).init(.{ 0, 1, 0 }) };
+    const uv = [_]math.Vec(2, f32){ math.Vec(2, f32).init(.{ 0, 0 }), math.Vec(2, f32).init(.{ 1, 1 }) };
+    const posSlice: []const math.Vec(3, f32) = &pos;
+    const nrmSlice: []const math.Vec(3, f32) = &nrm;
+    const uvSlice: []const math.Vec(2, f32) = &uv;
+    const src = .{ .position = posSlice, .normal = nrmSlice, .uv = uvSlice, .indices = [_]u16{ 0, 1 } };
+    mesh.edit().setVerticesSOA2(src).apply();
+    try std.testing.expect(mesh.getVertexCount() == 2);
+}
+
+test "mesh setMeshSOA sets vertices and indices" {
+    const V = struct { position: math.Vec(3, f32), uv: math.Vec(2, f32) };
+    const M = Mesh(V);
+    const gpa = std.testing.allocator;
+    const mesh = try M.create(gpa);
+    defer mesh.destroy(gpa);
+    const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 0, 0 }), math.Vec(3, f32).init(.{ 0, 1, 0 }) };
+    const uv = [_]math.Vec(2, f32){ math.Vec(2, f32).init(.{ 0, 0 }), math.Vec(2, f32).init(.{ 1, 0 }), math.Vec(2, f32).init(.{ 0, 1 }) };
+    const idx = [_]u16{ 0, 1, 2 };
+    const meshData = .{ .position = pos[0..], .uv = uv[0..], .indices = idx[0..] };
+    mesh.edit().setMeshSOA(meshData).apply();
+    try std.testing.expect(mesh.getVertexCount() == 3);
+    try std.testing.expect(mesh.getIndexCount() == 3);
+    try std.testing.expect(mesh.getIndexType() == .unsigned_short);
+}
+
+test "mesh setMeshSOA without indices" {
+    const V = struct { position: math.Vec(3, f32) };
+    const M = Mesh(V);
+    const gpa = std.testing.allocator;
+    const mesh = try M.create(gpa);
+    defer mesh.destroy(gpa);
+    const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 0, 0 }) };
+    const meshData = .{ .position = pos[0..] };
+    mesh.edit().setMeshSOA(meshData).apply();
+    try std.testing.expect(mesh.getVertexCount() == 2);
+    try std.testing.expect(mesh.getIndexCount() == 0);
+}
+
+test "mesh createWithSOA" {
+    const V = struct { position: math.Vec(3, f32), uv: math.Vec(2, f32) };
+    const M = Mesh(V);
+    const gpa = std.testing.allocator;
+    const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 0, 0 }) };
+    const uv = [_]math.Vec(2, f32){ math.Vec(2, f32).init(.{ 0, 0 }), math.Vec(2, f32).init(.{ 1, 0 }) };
+    const idx = [_]u16{ 0, 1 };
+    const meshData = .{ .position = pos[0..], .uv = uv[0..], .indices = idx[0..] };
+    const mesh = try M.createWithSOA(gpa, meshData);
+    defer mesh.destroy(gpa);
+    try std.testing.expect(mesh.getVertexCount() == 2);
+    try std.testing.expect(mesh.getIndexCount() == 2);
 }

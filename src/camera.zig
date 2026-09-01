@@ -166,18 +166,6 @@ pub fn Camera(comptime scalar_type_: type) type {
             return @ptrCast(m);
         }
 
-        /// Alias for `create` for API uniformity.
-        ///
-        /// Parameters:
-        /// - `allocator` — parameter `allocator`.
-        /// - `transform` — parameter `transform`.
-        /// - `on_use_callback` — parameter `on_use_callback`.
-        ///
-        /// Returns: `void)`.
-        pub fn init(allocator: std.mem.Allocator, transform: *TransformT, on_use_callback: ?*const fn (*Self) void) !*Self {
-            return create(allocator, transform, on_use_callback);
-        }
-
         /// Creates an instance with default transform.
         ///
         /// Parameters:
@@ -198,15 +186,6 @@ pub fn Camera(comptime scalar_type_: type) type {
         /// - `allocator` — parameter `allocator`.
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
             allocator.destroy(self.impl());
-        }
-
-        /// Alias for `destroy` for RAII.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        /// - `allocator` — parameter `allocator`.
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            self.destroy(allocator);
         }
 
         /// Returns the transform pointer.

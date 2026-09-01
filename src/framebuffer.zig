@@ -61,13 +61,6 @@ pub const Framebuffer = opaque {
         m.id = id;
         return @ptrCast(m);
     }
-    /// Alias for create that provides conventional init naming.
-    /// Parameters:
-    /// - allocator: allocator used to allocate Impl storage.
-    /// Returns: pointer to created Framebuffer.
-    pub fn init(allocator: std.mem.Allocator) !*Framebuffer {
-        return create(allocator);
-    }
     /// Destroys the framebuffer and frees Impl storage.
     /// Parameters:
     /// - self: framebuffer to destroy.
@@ -77,14 +70,6 @@ pub const Framebuffer = opaque {
         const m = self.impl();
         if (gl.loader.loaded() and m.id != 0) gl.framebuffers.delete(1, @ptrCast(&m.id));
         allocator.destroy(m);
-    }
-    /// Alias for destroy with conventional deinit naming.
-    /// Parameters:
-    /// - self: framebuffer to deinitialize.
-    /// - allocator: allocator that was used for creation.
-    /// Returns: void.
-    pub fn deinit(self: *Framebuffer, allocator: std.mem.Allocator) void {
-        self.destroy(allocator);
     }
     /// Checks whether the underlying OpenGL framebuffer object is valid.
     /// Parameters:

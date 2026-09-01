@@ -118,14 +118,6 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
             if (_singleton == self) _singleton = null;
             allocator.destroy(m);
         }
-        /// Alias for destroy with conventional deinit name.
-        /// Parameters:
-        /// - self: program to deinitialize.
-        /// - allocator: allocator used for creation.
-        /// Returns: void.
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            self.destroy(allocator);
-        }
 
         /// Returns the OpenGL program identifier.
         /// Parameters:

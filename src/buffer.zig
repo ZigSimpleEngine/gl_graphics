@@ -70,14 +70,6 @@ pub fn Buffer(comptime data_: type) type {
             m.id = id;
             return @ptrCast(m);
         }
-        /// Alias for `create`. Creates a new buffer object.
-        /// Parameters:
-        ///   - allocator: Allocator used to allocate the `Impl` structure.
-        /// Returns:
-        ///   - Pointer to the newly created buffer.
-        pub fn init(allocator: std.mem.Allocator) !*@This() {
-            return create(allocator);
-        }
         /// Destroys the buffer object and frees its storage.
         /// Deletes the GL buffer name if non-zero and destroys the `Impl` allocation.
         /// Parameters:
@@ -89,15 +81,6 @@ pub fn Buffer(comptime data_: type) type {
             const m = self.impl();
             if (gl.loader.loaded() and m.id != 0) gl.buffers.delete(1, @ptrCast(&m.id));
             allocator.destroy(m);
-        }
-        /// Alias for `destroy`. Deinitializes the buffer.
-        /// Parameters:
-        ///   - self: Buffer to deinitialize.
-        ///   - allocator: Allocator that was used to create the buffer.
-        /// Returns:
-        ///   - void.
-        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-            self.destroy(allocator);
         }
 
         /// Checks whether the buffer name corresponds to a valid GL buffer.

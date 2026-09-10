@@ -27,9 +27,6 @@ pub fn Camera(comptime scalar_type_: type) type {
 
         /// Documentation.
         const Impl = struct {
-            /// Transform reference.
-            transform: *TransformT,
-
             /// Vertical field of view in radians (perspective).
             fov_y: Scalar = std.math.degreesToRadians(60.0),
 
@@ -75,8 +72,8 @@ pub fn Camera(comptime scalar_type_: type) type {
             /// Top bound of orthographic projection.
             ortho_top: Scalar = 1,
 
-            /// Documentation for `on_use_callback: ?*const fn (*Self) void = null,`.
-            on_use_callback: ?*const fn (*Self) void = null,
+            /// Documentation for `on_use_callback: ?*const fn (*Self, *TransformT) void = null,`.
+            on_use_callback: ?*const fn (*Self, *TransformT) void = null,
         };
 
         /// Function `impl`.
@@ -127,8 +124,9 @@ pub fn Camera(comptime scalar_type_: type) type {
         ///
         /// Parameters:
         /// - `m` — parameter `m`.
-        fn recalcView(m: *Impl) void {
-            m.view = m.transform.getMatrix().inverse();
+        /// - `transform` — external transform to compute view from.
+        fn recalcView(m: *Impl, transform: *TransformT) void {
+            m.view = transform.getMatrix().inverse();
         }
 
         /// Casts `f32` matrix to current scalar type.
@@ -154,29 +152,26 @@ pub fn Camera(comptime scalar_type_: type) type {
         ///
         /// Parameters:
         /// - `allocator` — parameter `allocator`.
-        /// - `transform` — parameter `transform`.
         /// - `on_use_callback` — parameter `on_use_callback`.
         ///
         /// Returns: `void)`.
-        pub fn create(allocator: std.mem.Allocator, transform: *TransformT, on_use_callback: ?*const fn (*Self) void) !*Self {
+        pub fn create(allocator: std.mem.Allocator, on_use_callback: ?*const fn (*Self, *TransformT) void) !*Self {
             const m = try allocator.create(Impl);
-            m.* = .{ .transform = transform, .on_use_callback = on_use_callback };
+            m.* = .{ .on_use_callback = on_use_callback };
             recalcProjection(m);
-            recalcView(m);
+            // view stays identity until use(transform) provides a transform
             return @ptrCast(m);
         }
 
-        /// Creates an instance with default transform.
+        /// Creates an instance with default transform (kept for compatibility, no transform allocation).
         ///
         /// Parameters:
         /// - `allocator` — parameter `allocator`.
         /// - `on_use_callback` — parameter `on_use_callback`.
         ///
         /// Returns: `void)`.
-        pub fn default(allocator: std.mem.Allocator, on_use_callback: ?*const fn (*Self) void) !*Self {
-            const transform = try TransformT.identity(allocator);
-            errdefer transform.destroy(allocator);
-            return create(allocator, transform, on_use_callback);
+        pub fn default(allocator: std.mem.Allocator, on_use_callback: ?*const fn (*Self, *TransformT) void) !*Self {
+            return create(allocator, on_use_callback);
         }
 
         /// Destroys the instance, freeing `Impl`.
@@ -186,26 +181,6 @@ pub fn Camera(comptime scalar_type_: type) type {
         /// - `allocator` — parameter `allocator`.
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
             allocator.destroy(self.impl());
-        }
-
-        /// Returns the transform pointer.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `*TransformT`.
-        pub fn getTransform(self: *const Self) *TransformT {
-            return self.implConst().transform;
-        }
-
-        /// Returns a mutable transform pointer.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `*TransformT`.
-        pub fn getTransformMut(self: *Self) *TransformT {
-            return self.impl().transform;
         }
 
         /// Returns the vertical field of view.
@@ -316,7 +291,7 @@ pub fn Camera(comptime scalar_type_: type) type {
         /// - `self` — parameter `self`.
         ///
         /// Returns: `?*const`.
-        pub fn getOnUseCallback(self: *const Self) ?*const fn (*Self) void {
+        pub fn getOnUseCallback(self: *const Self) ?*const fn (*Self, *TransformT) void {
             return self.implConst().on_use_callback;
         }
 
@@ -329,14 +304,15 @@ pub fn Camera(comptime scalar_type_: type) type {
             gl.viewport.viewport(m.viewport_x, m.viewport_y, m.viewport_w, m.viewport_h);
         }
 
-        /// Activates the instance, updating state.
+        /// Activates the instance, updating view from external transform.
         ///
         /// Parameters:
         /// - `self` — parameter `self`.
-        pub fn use(self: *Self) void {
+        /// - `transform` — external transform to compute view matrix from. Must be already recalculated by caller if needed.
+        pub fn use(self: *Self, transform: *TransformT) void {
             const m = self.impl();
-            if (m.on_use_callback) |cb| cb(self);
-            recalcView(m);
+            if (m.on_use_callback) |cb| cb(self, transform);
+            recalcView(m, transform);
             self.applyViewport();
         }
 
@@ -376,14 +352,8 @@ pub fn Camera(comptime scalar_type_: type) type {
             /// Pending orthographic bounds.
             _pending_ortho: ?struct { l: Scalar, r: Scalar, b: Scalar, t: Scalar } = null,
 
-            /// Pending camera position.
-            _pending_position: ?Vec3 = null,
-
-            /// Pending look-at parameters.
-            _pending_look_at: ?struct { eye: Vec3, center: Vec3, up: Vec3 } = null,
-
-            /// Documentation for `_pending_on_use_callback: ?*const fn (*Self) void = null,`.
-            _pending_on_use_callback: ?*const fn (*Self) void = null,
+            /// Documentation for `_pending_on_use_callback: ?*const fn (*Self, *TransformT) void = null,`.
+            _pending_on_use_callback: ?*const fn (*Self, *TransformT) void = null,
 
             /// Flag indicating pending callback presence.
             _has_pending_on_use_callback: bool = false,
@@ -500,44 +470,6 @@ pub fn Camera(comptime scalar_type_: type) type {
                 return @constCast(self);
             }
 
-            /// Sets the pending position.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `pos` — parameter `pos`.
-            ///
-            /// Returns: `*const`.
-            pub fn setPosition(self: *const Editor, pos: Vec3) *const Editor {
-                @constCast(self)._pending_position = pos;
-                return @constCast(self);
-            }
-
-            /// Sets the pending look-at.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `eye` — parameter `eye`.
-            /// - `center` — parameter `center`.
-            /// - `up` — parameter `up`.
-            ///
-            /// Returns: `*const`.
-            pub fn setLookAt(self: *const Editor, eye: Vec3, center: Vec3, up: Vec3) *const Editor {
-                @constCast(self)._pending_look_at = .{ .eye = eye, .center = center, .up = up };
-                return @constCast(self);
-            }
-
-            /// Replaces the transform immediately.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `transform` — parameter `transform`.
-            ///
-            /// Returns: `*const`.
-            pub fn setTransform(self: *const Editor, transform: *TransformT) *const Editor {
-                @constCast(self)._camera.impl().transform = transform;
-                return @constCast(self);
-            }
-
             /// Sets the pending `on_use` callback.
             ///
             /// Parameters:
@@ -545,7 +477,7 @@ pub fn Camera(comptime scalar_type_: type) type {
             /// - `cb` — parameter `cb`.
             ///
             /// Returns: `void)`.
-            pub fn setOnUseCallback(self: *const Editor, cb: ?*const fn (*Self) void) *const Editor {
+            pub fn setOnUseCallback(self: *const Editor, cb: ?*const fn (*Self, *TransformT) void) *const Editor {
                 @constCast(self)._pending_on_use_callback = cb;
                 @constCast(self)._has_pending_on_use_callback = true;
                 return @constCast(self);
@@ -575,23 +507,8 @@ pub fn Camera(comptime scalar_type_: type) type {
                     cam.viewport_h = vp.h;
                     @constCast(self)._camera.applyViewport();
                 }
-                if (@constCast(self)._pending_position) |p| {
-                    cam.transform.position().* = p;
-                    cam.transform.recalculateTransformMatrix();
-                    recalcView(cam);
-                }
-                if (@constCast(self)._pending_look_at) |la| {
-                    const eye_f = math.Vec(3, f32).init(.{ la.eye.v[0], la.eye.v[1], la.eye.v[2] });
-                    const center_f = math.Vec(3, f32).init(.{ la.center.v[0], la.center.v[1], la.center.v[2] });
-                    const up_f = math.Vec(3, f32).init(.{ la.up.v[0], la.up.v[1], la.up.v[2] });
-                    const view_f = math.mat.lookAt(eye_f, center_f, up_f);
-                    cam.view = castMat4(view_f);
-                    cam.transform.impl().matrix = cam.view.inverse();
-                    cam.transform.position().* = Vec3.init(.{ cam.transform.impl().matrix.data[3].v[0], cam.transform.impl().matrix.data[3].v[1], cam.transform.impl().matrix.data[3].v[2] });
-                }
                 if (@constCast(self)._has_pending_on_use_callback) cam.on_use_callback = @constCast(self)._pending_on_use_callback;
                 recalcProjection(cam);
-                recalcView(cam);
                 @constCast(self).* = Editor.init(@constCast(self)._camera);
             }
 

@@ -15,7 +15,7 @@ pub const Framebuffer = @import("framebuffer.zig").Framebuffer;
 /// Global registry by comptime name, re-exported from `core`.
 pub const Map = @import("core").Map;
 
-/// Hierarchical transform, re-exported from `core`.
+/// ECS-style transform component, re-exported from `core`.
 pub const Transform = @import("core").Transform;
 
 /// Camera with projection and viewport.
@@ -152,20 +152,28 @@ test "map get/set" {
     try std.testing.expectEqual(@as(i32, 42), MyMap.get(0));
 }
 
-test "transform hierarchy basic" {
+test "transform ecs basic" {
     const T = Transform(f32);
-    const gpa = std.testing.allocator;
-    const root = try T.create(gpa);
-    defer root.destroy(gpa);
-    const child = try T.create(gpa);
-    defer child.destroy(gpa);
-    child.position().* = math.Vec(3, f32).init(.{ 1, 0, 0 });
-    try root.addChild(gpa, child);
-    try std.testing.expectEqual(@as(usize, 1), root.getChildrenCount());
-    try std.testing.expect(child.getParent() == root);
-    root.recalculateTransformMatricesDownward();
-    _ = root.getMatrix();
-    _ = child.getMatrix();
+    var root_t = T.identity();
+    root_t.position = math.Vec(3, f32).init(.{ 1, 0, 0 });
+    const root_world = root_t.toMatrix();
+
+    var child_t = T.identity();
+    const child_world = child_t.toWorldMatrix(root_world);
+    // Child at local origin lands on the parent position.
+    const child_pos = T.translation(child_world);
+    try std.testing.expectEqual(@as(f32, 1), child_pos.v[0]);
+    try std.testing.expectEqual(@as(f32, 0), child_pos.v[1]);
+    try std.testing.expectEqual(@as(f32, 0), child_pos.v[2]);
+
+    try std.testing.expectEqual(@as(f32, 1), root_t.rightLocal().v[0]);
+
+    // Camera view path: inverse of the world matrix.
+    const view = root_world.inverse();
+    const view_t = T.translation(view);
+    try std.testing.expectEqual(@as(f32, -1), view_t.v[0]);
+    try std.testing.expectEqual(@as(f32, 0), view_t.v[1]);
+    try std.testing.expectEqual(@as(f32, 0), view_t.v[2]);
 }
 
 test "mesh layout compile" {

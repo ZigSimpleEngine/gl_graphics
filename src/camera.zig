@@ -117,13 +117,15 @@ pub fn Camera(comptime scalar_type_: type) type {
             }
         }
 
-        /// Recalculates the view matrix as inverse of transform.
+        /// Recalculates the view matrix as inverse of the world matrix built
+        /// from the transform and an explicitly passed parent world matrix.
         ///
         /// Parameters:
         /// - `m` — parameter `m`.
-        /// - `transform` — external transform to compute view from.
-        fn recalcView(m: *Impl, transform: *TransformT) void {
-            m.view = transform.getMatrix().inverse();
+        /// - `transform` — external transform value to compute view from.
+        /// - `parent_world` — world matrix of the transform's parent (`Mat4.identity()` if parentless).
+        fn recalcView(m: *Impl, transform: TransformT, parent_world: Mat4) void {
+            m.view = transform.toWorldMatrix(parent_world).inverse();
         }
 
         /// Casts `f32` matrix to current scalar type.
@@ -293,10 +295,11 @@ pub fn Camera(comptime scalar_type_: type) type {
         ///
         /// Parameters:
         /// - `self` — parameter `self`.
-        /// - `transform` — external transform to compute view matrix from. Must be already recalculated by caller if needed.
-        pub fn use(self: *Self, transform: *TransformT) void {
+        /// - `transform` — external transform value to compute view matrix from.
+        /// - `parent_world` — world matrix of the transform's parent (`Mat4.identity()` if parentless).
+        pub fn use(self: *Self, transform: TransformT, parent_world: Mat4) void {
             const m = self.impl();
-            recalcView(m, transform);
+            recalcView(m, transform, parent_world);
             self.applyViewport();
         }
 

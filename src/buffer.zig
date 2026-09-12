@@ -8,6 +8,7 @@ const gl = @import("gl");
 /// a deferred `Editor` for batched updates.
 /// Parameters:
 ///   - data_: Element type stored in the buffer; determines count calculations.
+///
 /// Returns:
 ///   - Opaque buffer type handling GL buffer objects for the given element type.
 pub fn Buffer(comptime data_: type) type {
@@ -34,6 +35,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Returns a mutable pointer to the underlying `Impl` storage.
         /// Parameters:
         ///   - self: Opaque buffer handle to reinterpret as `Impl`.
+        ///
         /// Returns:
         ///   - Mutable pointer to the `Impl` instance.
         inline fn impl(self: *Self) *Impl {
@@ -42,6 +44,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Returns a const pointer to the underlying `Impl` storage.
         /// Parameters:
         ///   - self: Const opaque buffer handle to reinterpret as `Impl`.
+        ///
         /// Returns:
         ///   - Const pointer to the `Impl` instance.
         inline fn implConst(self: *const Self) *const Impl {
@@ -55,6 +58,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Allocates `Impl`, initializes it with defaults and generates a GL buffer name.
         /// Parameters:
         ///   - allocator: Allocator used to allocate the `Impl` structure.
+        ///
         /// Returns:
         ///   - Pointer to the newly created buffer on success.
         ///   - Allocation or other error on failure.
@@ -75,6 +79,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Parameters:
         ///   - self: Buffer to destroy.
         ///   - allocator: Allocator that was used to create the buffer.
+        ///
         /// Returns:
         ///   - void.
         pub fn destroy(self: *@This(), allocator: std.mem.Allocator) void {
@@ -86,6 +91,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Checks whether the buffer name corresponds to a valid GL buffer.
         /// Parameters:
         ///   - self: Buffer to validate.
+        ///
         /// Returns:
         ///   - True if the ID is non-zero and `glIsBuffer` succeeds, false otherwise.
         pub fn isValid(self: *const @This()) bool {
@@ -96,6 +102,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Returns the GL buffer object name (ID).
         /// Parameters:
         ///   - self: Buffer to query.
+        ///
         /// Returns:
         ///   - GL buffer name as `u32`.
         pub fn getId(self: *const @This()) u32 {
@@ -104,6 +111,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Returns the buffer binding target.
         /// Parameters:
         ///   - self: Buffer to query.
+        ///
         /// Returns:
         ///   - Buffer target enumeration.
         pub fn getTarget(self: *const @This()) gl.buffers.BufferTarget {
@@ -112,6 +120,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Returns the usage hint for the buffer.
         /// Parameters:
         ///   - self: Buffer to query.
+        ///
         /// Returns:
         ///   - Buffer usage enumeration.
         pub fn getUsage(self: *const @This()) gl.buffers.BufferUsage {
@@ -120,6 +129,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Returns the size of the buffer store in bytes.
         /// Parameters:
         ///   - self: Buffer to query.
+        ///
         /// Returns:
         ///   - Size in bytes as `usize`.
         pub fn getSizeBytes(self: *const @This()) usize {
@@ -128,6 +138,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Returns the number of elements of type `DataType` stored.
         /// Parameters:
         ///   - self: Buffer to query.
+        ///
         /// Returns:
         ///   - Element count as `usize`.
         pub fn getCount(self: *const @This()) usize {
@@ -136,6 +147,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Returns the element type of this buffer instantiation.
         /// Parameters:
         ///   - _: Buffer instance (unused, only for method syntax).
+        ///
         /// Returns:
         ///   - The comptime type `data_`.
         pub fn getDataType(_: *const @This()) type {
@@ -144,6 +156,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Returns whether the buffer is currently mapped.
         /// Parameters:
         ///   - self: Buffer to query.
+        ///
         /// Returns:
         ///   - True if mapped, false otherwise.
         pub fn getIsMapped(self: *const @This()) bool {
@@ -153,6 +166,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Queries the GL buffer size parameter after binding the buffer.
         /// Parameters:
         ///   - self: Buffer whose size to query from GL.
+        ///
         /// Returns:
         ///   - Buffer size in bytes as reported by GL via `GL_BUFFER_SIZE`.
         pub fn querySize(self: *const @This()) i32 {
@@ -165,6 +179,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Queries the GL buffer usage parameter after binding the buffer.
         /// Parameters:
         ///   - self: Buffer whose usage to query from GL.
+        ///
         /// Returns:
         ///   - Buffer usage as reported by GL via `GL_BUFFER_USAGE` as `i32`.
         pub fn queryUsage(self: *const @This()) i32 {
@@ -177,6 +192,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Queries whether the GL buffer is currently mapped after binding.
         /// Parameters:
         ///   - self: Buffer to query.
+        ///
         /// Returns:
         ///   - True if GL reports the buffer as mapped, false otherwise.
         pub fn queryMapped(self: *const @This()) bool {
@@ -189,6 +205,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Queries the GL buffer map length after binding the buffer.
         /// Parameters:
         ///   - self: Buffer to query.
+        ///
         /// Returns:
         ///   - Map length as reported by GL via `GL_BUFFER_MAP_LENGTH` as `i32`.
         pub fn queryMapLength(self: *const @This()) i32 {
@@ -201,6 +218,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Queries the GL buffer map offset after binding the buffer.
         /// Parameters:
         ///   - self: Buffer to query.
+        ///
         /// Returns:
         ///   - Map offset as reported by GL via `GL_BUFFER_MAP_OFFSET` as `i32`.
         pub fn queryMapOffset(self: *const @This()) i32 {
@@ -213,6 +231,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Queries the GL buffer access flags after binding the buffer.
         /// Parameters:
         ///   - self: Buffer to query.
+        ///
         /// Returns:
         ///   - Access flags as reported by GL via `GL_BUFFER_ACCESS_FLAGS` as `i32`.
         pub fn queryAccessFlags(self: *const @This()) i32 {
@@ -226,6 +245,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Binds the buffer to its current target.
         /// Parameters:
         ///   - self: Buffer to bind.
+        ///
         /// Returns:
         ///   - void.
         pub fn bind(self: *const @This()) void {
@@ -236,6 +256,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Parameters:
         ///   - self: Buffer to bind.
         ///   - target: Buffer target to bind to.
+        ///
         /// Returns:
         ///   - void.
         pub fn bindTo(self: *const @This(), target: gl.buffers.BufferTarget) void {
@@ -244,6 +265,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Alias for `bind`. Binds the buffer to its current target.
         /// Parameters:
         ///   - self: Buffer to bind.
+        ///
         /// Returns:
         ///   - void.
         pub fn use(self: *const @This()) void {
@@ -253,6 +275,7 @@ pub fn Buffer(comptime data_: type) type {
         /// Creates an `Editor` for deferred buffer configuration.
         /// Parameters:
         ///   - self: Buffer to edit.
+        ///
         /// Returns:
         ///   - Initialized `Editor` instance referencing this buffer.
         pub fn edit(self: *Self) Editor {
@@ -356,6 +379,7 @@ pub fn Buffer(comptime data_: type) type {
             /// Initializes an editor for the given buffer.
             /// Parameters:
             ///   - buffer: Buffer to be edited; stored by reference.
+            ///
             /// Returns:
             ///   - Initialized `Editor` with no pending changes.
             pub fn init(buffer: *Self) Editor {
@@ -366,6 +390,7 @@ pub fn Buffer(comptime data_: type) type {
             /// Parameters:
             ///   - self: Editor instance.
             ///   - target: New buffer target to apply.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setTarget(self: *const Editor, target: gl.buffers.BufferTarget) *const Editor {
@@ -376,6 +401,7 @@ pub fn Buffer(comptime data_: type) type {
             /// Parameters:
             ///   - self: Editor instance.
             ///   - usage: New usage hint to apply.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setUsage(self: *const Editor, usage: gl.buffers.BufferUsage) *const Editor {
@@ -387,6 +413,7 @@ pub fn Buffer(comptime data_: type) type {
             ///   - self: Editor instance.
             ///   - data: Slice of typed elements to upload.
             ///   - usage: Usage hint for the new store.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setData(self: *const Editor, data: []const data_, usage: gl.buffers.BufferUsage) *const Editor {
@@ -398,6 +425,7 @@ pub fn Buffer(comptime data_: type) type {
             ///   - self: Editor instance.
             ///   - bytes: Raw bytes to upload.
             ///   - usage: Usage hint for the new store.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setDataBytes(self: *const Editor, bytes: []const u8, usage: gl.buffers.BufferUsage) *const Editor {
@@ -409,6 +437,7 @@ pub fn Buffer(comptime data_: type) type {
             ///   - self: Editor instance.
             ///   - size_bytes: Size in bytes to allocate.
             ///   - usage: Usage hint for the new store.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn reserve(self: *const Editor, size_bytes: usize, usage: gl.buffers.BufferUsage) *const Editor {
@@ -420,6 +449,7 @@ pub fn Buffer(comptime data_: type) type {
             ///   - self: Editor instance.
             ///   - offset: Byte offset within the buffer.
             ///   - bytes: Bytes to write.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setSubData(self: *const Editor, offset: usize, bytes: []const u8) *const Editor {
@@ -431,6 +461,7 @@ pub fn Buffer(comptime data_: type) type {
             ///   - self: Editor instance.
             ///   - offset_elements: Element offset within the buffer.
             ///   - slice: Slice of typed elements to write.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setSubDataTyped(self: *const Editor, offset_elements: usize, slice: []const data_) *const Editor {
@@ -444,6 +475,7 @@ pub fn Buffer(comptime data_: type) type {
             ///   - read_offset: Byte offset in the source buffer.
             ///   - write_offset: Byte offset in the destination buffer.
             ///   - size: Number of bytes to copy.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setCopySubData(self: *const Editor, read_target: gl.buffers.BufferTarget, read_offset: usize, write_offset: usize, size: usize) *const Editor {
@@ -455,6 +487,7 @@ pub fn Buffer(comptime data_: type) type {
             ///   - self: Editor instance.
             ///   - target: Target for indexed binding.
             ///   - index: Index of the binding point.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setBindBase(self: *const Editor, target: gl.buffers.BufferTarget, index: u32) *const Editor {
@@ -468,6 +501,7 @@ pub fn Buffer(comptime data_: type) type {
             ///   - index: Index of the binding point.
             ///   - offset: Byte offset within the buffer.
             ///   - size: Number of bytes to bind.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setBindRange(self: *const Editor, target: gl.buffers.BufferTarget, index: u32, offset: usize, size: usize) *const Editor {
@@ -480,6 +514,7 @@ pub fn Buffer(comptime data_: type) type {
             ///   - offset: Byte offset to begin mapping.
             ///   - length: Length in bytes to map.
             ///   - access: Access flags for the mapping.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setMap(self: *const Editor, offset: usize, length: usize, access: gl.buffers.MapAccess) *const Editor {
@@ -489,6 +524,7 @@ pub fn Buffer(comptime data_: type) type {
             /// Queues an unmap operation via `glUnmapBuffer`.
             /// Parameters:
             ///   - self: Editor instance.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setUnmap(self: *const Editor) *const Editor {
@@ -500,6 +536,7 @@ pub fn Buffer(comptime data_: type) type {
             ///   - self: Editor instance.
             ///   - offset: Byte offset of the range to flush.
             ///   - length: Length in bytes of the range to flush.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setFlushMappedRange(self: *const Editor, offset: usize, length: usize) *const Editor {
@@ -511,6 +548,7 @@ pub fn Buffer(comptime data_: type) type {
             /// Parameters:
             ///   - self: Editor instance.
             ///   - data: Slice of typed elements to upload.
+            ///
             /// Returns:
             ///   - Pointer to the editor for chaining.
             pub fn setDataSimple(self: *const Editor, data: []const data_) *const Editor {
@@ -524,6 +562,7 @@ pub fn Buffer(comptime data_: type) type {
             /// and `unmap` operations in order, then resets pending state.
             /// Parameters:
             ///   - self: Editor instance holding pending operations.
+            ///
             /// Returns:
             ///   - void.
             pub fn apply(self: *const Editor) void {
@@ -588,6 +627,7 @@ pub fn Buffer(comptime data_: type) type {
             ///   - offset: Byte offset to begin mapping.
             ///   - length: Length in bytes to map.
             ///   - access: Access flags for the mapping.
+            ///
             /// Returns:
             ///   - Mapped pointer as `?*anyopaque` on success, null if mapping failed or GL not loaded.
             pub fn mapNow(self: *const Editor, offset: usize, length: usize, access: gl.buffers.MapAccess) ?*anyopaque {
@@ -605,6 +645,7 @@ pub fn Buffer(comptime data_: type) type {
             /// Binds the effective target and calls `glUnmapBuffer`.
             /// Parameters:
             ///   - self: Editor instance.
+            ///
             /// Returns:
             ///   - True if unmapping succeeded, false otherwise.
             pub fn unmapNow(self: *const Editor) bool {

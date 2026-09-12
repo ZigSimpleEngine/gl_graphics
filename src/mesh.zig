@@ -5,6 +5,7 @@ const math = @import("math");
 /// Maps a scalar Zig type to the corresponding OpenGL data type.
 /// Parameters:
 /// - `T`: Scalar type to map (e.g., `f32`, `i16`, `u32`, `bool`).
+///
 /// Returns: `gl.enums.DataType` value for the given type; defaults to `.float` for unsupported types.
 fn scalarGLType(comptime T: type) gl.enums.DataType {
     return switch (T) {
@@ -17,6 +18,7 @@ fn scalarGLType(comptime T: type) gl.enums.DataType {
 /// Determines whether a type is an integer vertex attribute type.
 /// Parameters:
 /// - `T`: Type to test.
+///
 /// Returns: `true` if `T` is `i8`, `u8`, `i16`, `u16`, `i32`, or `u32`; `false` otherwise.
 fn isIntType(comptime T: type) bool {
     return switch (T) { i8, u8, i16, u16, i32, u32 => true, else => false };
@@ -46,6 +48,7 @@ pub const AttribInfo = struct {
 /// Handles vector-like structs with `len` and `value_type`, matrix-like structs with `cols`, `rows`, `value_type` and `col_type`, scalars, and arrays.
 /// Parameters:
 /// - `Vertex`: Struct type representing a single vertex.
+///
 /// Returns: Compile-time slice of `AttribInfo` entries, one per attribute or matrix column.
 fn computeLayout(comptime Vertex: type) []const AttribInfo {
     const fields = @typeInfo(Vertex).@"struct".fields;
@@ -142,6 +145,7 @@ fn computeFieldSlots(comptime Vertex: type) [computeLayout(Vertex).len]FieldSlot
 /// Maps a mesh index type to the corresponding OpenGL element type.
 /// Parameters:
 /// - `Index`: Index element type. Supported: `u8`, `u16`, `u32`, `i16`, `i32`.
+///
 /// Returns: `gl.enums.DataType` suitable for `drawElements`.
 fn indexGLType(comptime Index: type) gl.enums.DataType {
     return switch (Index) {
@@ -154,6 +158,7 @@ fn indexGLType(comptime Index: type) gl.enums.DataType {
 /// Index type is inferred from the slice passed to `setIndices`, avoiding conversions.
 /// Parameters:
 /// - `Vertex`: Vertex struct type defining layout.
+///
 /// Returns: Opaque mesh type providing GPU resource management and draw API.
 pub fn Mesh(comptime Vertex: type) type {
     switch (@typeInfo(Vertex)) { .@"struct" => {}, else => @compileError("Mesh Vertex must be struct") }
@@ -201,12 +206,14 @@ pub fn Mesh(comptime Vertex: type) type {
         /// Casts an opaque mesh pointer to mutable internal storage.
         /// Parameters:
         /// - `self`: Opaque mesh pointer.
+        ///
         /// Returns: Mutable `*Impl` pointer to internal data.
         inline fn impl(self: *Self) *Impl { return @ptrCast(@alignCast(self)); }
 
         /// Casts an opaque mesh pointer to const internal storage.
         /// Parameters:
         /// - `self`: Const opaque mesh pointer.
+        ///
         /// Returns: Const `*const Impl` pointer to internal data.
         inline fn implConst(self: *const Self) *const Impl { return @ptrCast(@alignCast(self)); }
 
@@ -239,6 +246,7 @@ pub fn Mesh(comptime Vertex: type) type {
         /// Creates a new mesh with generated VAO, VBO and EBO.
         /// Parameters:
         /// - `allocator`: Allocator used to allocate internal storage.
+        ///
         /// Returns: Pointer to the newly created opaque mesh, or allocation error.
         pub fn create(allocator: std.mem.Allocator) !*@This() {
             const m = try allocator.create(Impl);
@@ -261,6 +269,7 @@ pub fn Mesh(comptime Vertex: type) type {
         /// Parameters:
         /// - `allocator`: Allocator for mesh storage.
         /// - `mesh_soa_data`: Struct with vertex slices and optional `indices`.
+        ///
         /// Returns: Pointer to the initialized mesh or allocation error.
         pub fn createWithSOA(allocator: std.mem.Allocator, mesh_soa_data: anytype) !*@This() {
             const self = try create(allocator);
@@ -273,6 +282,7 @@ pub fn Mesh(comptime Vertex: type) type {
         /// Parameters:
         /// - `self`: Mesh to destroy.
         /// - `allocator`: Allocator that created the mesh.
+        ///
         /// Returns: `void`.
         pub fn destroy(self: *@This(), allocator: std.mem.Allocator) void {
             const m = self.impl();
@@ -293,89 +303,104 @@ pub fn Mesh(comptime Vertex: type) type {
         /// Checks whether the mesh has valid initialized GL handles.
         /// Parameters:
         /// - `self`: Mesh to test.
+        ///
         /// Returns: `true` if initialized and VAO is non-zero.
         pub fn isValid(self: *const @This()) bool { const m = self.implConst(); return m.initialized and m.vao != 0; }
 
         /// Returns the vertex array object handle.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: VAO handle as `u32`.
         pub fn getVao(self: *const @This()) u32 { return self.implConst().vao; }
 
         /// Returns the vertex buffer object handle.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: VBO handle as `u32`.
         pub fn getVbo(self: *const @This()) u32 { return self.implConst().vbo; }
 
         /// Returns the element buffer object handle.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: EBO handle as `u32`.
         pub fn getEbo(self: *const @This()) u32 { return self.implConst().ebo; }
 
         /// Returns the current vertex count.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: Number of vertices.
         pub fn getVertexCount(self: *const @This()) usize { return self.implConst().vertex_count; }
 
         /// Returns the current index count.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: Number of indices.
         pub fn getIndexCount(self: *const @This()) usize { return self.implConst().index_count; }
 
         /// Returns the primitive type used for drawing.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: `gl.drawing.PrimitiveType` value.
         pub fn getPrimitive(self: *const @This()) gl.drawing.PrimitiveType { return self.implConst().primitive; }
 
         /// Returns the OpenGL type for index elements.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: `gl.enums.DataType` for indices.
         pub fn getIndexType(self: *const @This()) gl.enums.DataType { return self.implConst().index_gl_type; }
 
         /// Returns the byte stride of a single vertex.
         /// Parameters:
         /// - `self`: Mesh instance (unused).
+        ///
         /// Returns: Size of `Vertex` in bytes.
         pub fn getStride(_: *const @This()) usize { return @sizeOf(Vertex); }
 
         /// Returns the compile-time vertex attribute layout.
         /// Parameters:
         /// - `self`: Mesh instance (unused).
+        ///
         /// Returns: Slice of `AttribInfo` describing attributes.
         pub fn getLayout(_: *const @This()) []const AttribInfo { return layout; }
 
         /// Returns the buffer usage hint for vertex data.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: `gl.buffers.BufferUsage` for vertices.
         pub fn getVertexUsage(self: *const @This()) gl.buffers.BufferUsage { return self.implConst().vertex_usage; }
 
         /// Returns the buffer usage hint for index data.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: `gl.buffers.BufferUsage` for indices.
         pub fn getIndexUsage(self: *const @This()) gl.buffers.BufferUsage { return self.implConst().index_usage; }
 
         /// Binds the mesh VAO as current.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: `void`.
         pub fn use(self: *const @This()) void { gl.vertex_arrays.bind(self.implConst().vao); }
 
         /// Alias for `use`, binds the mesh VAO.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: `void`.
         pub fn bind(self: *const @This()) void { self.use(); }
 
         /// Unbinds any VAO by binding 0.
         /// Parameters: none.
+        ///
         /// Returns: `void`.
         pub fn unbind() void { gl.vertex_arrays.bind(0); }
 
@@ -383,6 +408,7 @@ pub fn Mesh(comptime Vertex: type) type {
         /// Uses `drawElements` if indices exist, otherwise `drawArrays`.
         /// Parameters:
         /// - `self`: Mesh instance.
+        ///
         /// Returns: `void`.
         pub fn draw(self: *const @This()) void {
             self.use();
@@ -395,6 +421,7 @@ pub fn Mesh(comptime Vertex: type) type {
         /// Parameters:
         /// - `self`: Mesh instance.
         /// - `instance_count`: Number of instances to draw.
+        ///
         /// Returns: `void`.
         pub fn drawInstanced(self: *const @This(), instance_count: i32) void {
             self.use();
@@ -406,6 +433,7 @@ pub fn Mesh(comptime Vertex: type) type {
         /// Creates an editor for batching mesh updates.
         /// Parameters:
         /// - `self`: Mesh to edit.
+        ///
         /// Returns: `Editor` instance bound to the mesh.
         pub fn edit(self: *Self) Editor { return Editor.init(self); }
 
@@ -446,6 +474,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Initializes an editor for the given mesh.
             /// Parameters:
             /// - `mesh`: Mesh to edit.
+            ///
             /// Returns: Initialized `Editor`.
             pub fn init(mesh: *Self) Editor { return .{ ._mesh = mesh }; }
 
@@ -453,6 +482,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `vertices`: Slice of vertices to upload.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setVertices(self: *const Editor, vertices: []const Vertex) *const Editor {
                 const mut = @constCast(self);
@@ -469,6 +499,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// - `self`: Editor instance.
             /// - `bytes`: Raw interleaved vertex bytes to upload.
             /// - `count`: Number of vertices encoded in `bytes`.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setVerticesBytes(self: *const Editor, bytes: []const u8, count: usize) *const Editor {
                 const mut = @constCast(self);
@@ -486,6 +517,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `soa`: Value of type Vertex.SOA containing per-attribute slices.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setVerticesSOA(self: *const Editor, soa: anytype) *const Editor {
                 const mut = @constCast(self);
@@ -536,6 +568,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `source`: Struct containing slices/arrays for each vertex attribute (may contain extra fields).
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setVerticesSOA2(self: *const Editor, source: anytype) *const Editor {
                 const Source = @TypeOf(source);
@@ -604,6 +637,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `indices`: Slice or array of indices (`[]const u8`/`u16`/`u32` etc., also `[N]T` or `*const [N]T`).
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setIndices(self: *const Editor, indices: anytype) *const Editor {
                 const Indices = @TypeOf(indices);
@@ -654,6 +688,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `mesh_data_soa`: Struct with vertex slices and optional `indices` slice/array.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setMeshSOA(self: *const Editor, mesh_data_soa: anytype) *const Editor {
                 const Data = @TypeOf(mesh_data_soa);
@@ -673,6 +708,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// - `bytes`: Raw index bytes to upload.
             /// - `gl_type`: Element type (`.unsigned_byte`/`.unsigned_short`/`.unsigned_int`).
             /// - `count`: Number of indices encoded in `bytes`.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setIndicesBytes(self: *const Editor, bytes: []const u8, gl_type: gl.enums.DataType, count: usize) *const Editor {
                 const elem_size: usize = switch (gl_type) {
@@ -697,6 +733,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// - `self`: Editor instance.
             /// - `field_index`: Top-level vertex field index (declaration order).
             /// - `bytes`: Raw field bytes to upload.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setSoaField(self: *const Editor, field_index: u32, bytes: []const u8) *const Editor {
                 const mut = @constCast(self);
@@ -713,6 +750,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `count`: Number of vertices in every populated SOA field.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setSoaCount(self: *const Editor, count: usize) *const Editor {
                 const mut = @constCast(self);
@@ -727,6 +765,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `buffer_id`: External GL buffer handle for vertices.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setVertexBuffer(self: *const Editor, buffer_id: u32) *const Editor { @constCast(self)._pending_vertex_buffer = buffer_id; return @constCast(self); }
 
@@ -734,6 +773,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `buffer_id`: External GL buffer handle for indices.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setIndexBuffer(self: *const Editor, buffer_id: u32) *const Editor { @constCast(self)._pending_index_buffer = buffer_id; return @constCast(self); }
 
@@ -741,6 +781,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `buffer`: Typed buffer providing `getId()`.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setVertexBufferTyped(self: *const Editor, buffer: anytype) *const Editor { @constCast(self)._pending_vertex_buffer = buffer.getId(); return @constCast(self); }
 
@@ -748,6 +789,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `buffer`: Typed buffer providing `getId()`.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setIndexBufferTyped(self: *const Editor, buffer: anytype) *const Editor { @constCast(self)._pending_index_buffer = buffer.getId(); return @constCast(self); }
 
@@ -755,6 +797,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `usage`: `gl.buffers.BufferUsage` hint.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setVertexUsage(self: *const Editor, usage: gl.buffers.BufferUsage) *const Editor { @constCast(self)._pending_vertex_usage = usage; return @constCast(self); }
 
@@ -762,6 +805,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `usage`: `gl.buffers.BufferUsage` hint.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setIndexUsage(self: *const Editor, usage: gl.buffers.BufferUsage) *const Editor { @constCast(self)._pending_index_usage = usage; return @constCast(self); }
 
@@ -769,6 +813,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `primitive`: `gl.drawing.PrimitiveType` value.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setPrimitive(self: *const Editor, primitive: gl.drawing.PrimitiveType) *const Editor { @constCast(self)._pending_primitive = primitive; return @constCast(self); }
 
@@ -777,6 +822,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// - `self`: Editor instance.
             /// - `attrib_index`: Attribute location.
             /// - `divisor`: Instance divisor.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setDivisor(self: *const Editor, attrib_index: u32, divisor: u32) *const Editor { _ = attrib_index; _ = divisor; return @constCast(self); }
 
@@ -784,6 +830,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Parameters:
             /// - `self`: Editor instance.
             /// - `divisors`: Slice of `{index, divisor}` pairs.
+            ///
             /// Returns: `*const Editor` for chaining.
             pub fn setAttributeDivisors(self: *const Editor, divisors: []const struct { index: u32, divisor: u32 }) *const Editor { @constCast(self)._pending_divisors = divisors; return @constCast(self); }
 
@@ -791,6 +838,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Binds VAO, uploads vertex and index data or rebinds external buffers, configures attributes and divisors.
             /// Parameters:
             /// - `self`: Editor instance.
+            ///
             /// Returns: `void`.
             pub fn apply(self: *const Editor) void {
                 const m = @constCast(self)._mesh.impl();
@@ -847,6 +895,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Uploads pending SOA data: one dedicated VBO per vertex field, then
             /// configures attribute pointers to read from those placed buffers.
             /// Parameters: none (uses `_mesh`, `_pending_soa_fields`, `_pending_soa_count`).
+            ///
             /// Returns: `void`.
             fn applySOA(self: *const Editor) void {
                 const m = @constCast(self)._mesh.impl();
@@ -883,6 +932,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Configures attribute pointers for the split (SOA) layout: each attribute
             /// reads from its own VBO with a tight stride and no per-attribute offset.
             /// Parameters: `self` (uses `_pending_soa_fields` and mesh `field_vbos`).
+            ///
             /// Returns: `void`.
             fn configureAttributesSOA(self: *const Editor) void {
                 const loaded = gl.loader.loaded();
@@ -907,6 +957,7 @@ pub fn Mesh(comptime Vertex: type) type {
             /// Configures vertex attribute pointers from the compile-time layout
             /// (interleaved AOS layout, single VBO).
             /// Parameters: none (uses outer `layout` and current VAO binding).
+            ///
             /// Returns: `void`.
             fn configureAttributes() void {
                 const loaded = gl.loader.loaded();

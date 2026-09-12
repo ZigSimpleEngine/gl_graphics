@@ -69,6 +69,7 @@ pub const Texture = opaque {
     /// Returns a mutable pointer to the underlying `Impl` storage.
     /// Parameters:
     ///   - self: Opaque texture handle to reinterpret as `Impl`.
+    ///
     /// Returns:
     ///   - Mutable pointer to the `Impl` instance.
     inline fn impl(self: *Texture) *Impl {
@@ -77,6 +78,7 @@ pub const Texture = opaque {
     /// Returns a const pointer to the underlying `Impl` storage.
     /// Parameters:
     ///   - self: Const opaque texture handle to reinterpret as `Impl`.
+    ///
     /// Returns:
     ///   - Const pointer to the `Impl` instance.
     inline fn implConst(self: *const Texture) *const Impl {
@@ -87,6 +89,7 @@ pub const Texture = opaque {
     /// Allocates `Impl`, initializes it with defaults and generates a GL texture name.
     /// Parameters:
     ///   - allocator: Allocator used to allocate the `Impl` structure.
+    ///
     /// Returns:
     ///   - Pointer to the newly created `Texture` on success.
     ///   - Allocation or other error on failure.
@@ -108,6 +111,7 @@ pub const Texture = opaque {
     /// Parameters:
     ///   - self: Texture to destroy.
     ///   - allocator: Allocator that was used to create the texture.
+    ///
     /// Returns:
     ///   - void.
     pub fn destroy(self: *Texture, allocator: std.mem.Allocator) void {
@@ -119,6 +123,7 @@ pub const Texture = opaque {
     /// Checks whether the texture name corresponds to a valid GL texture.
     /// Parameters:
     ///   - self: Texture to validate.
+    ///
     /// Returns:
     ///   - True if the ID is non-zero and `glIsTexture` succeeds, false otherwise.
     pub fn isValid(self: *const Texture) bool {
@@ -129,6 +134,7 @@ pub const Texture = opaque {
     /// Returns the GL texture object name (ID).
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - GL texture name as `u32`.
     pub fn getId(self: *const Texture) u32 {
@@ -137,6 +143,7 @@ pub const Texture = opaque {
     /// Returns the texture binding target.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Texture target enumeration.
     pub fn getTarget(self: *const Texture) gl.textures.TextureTarget {
@@ -145,6 +152,7 @@ pub const Texture = opaque {
     /// Returns the sized internal format, if set.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Optional internal format; null if not yet specified.
     pub fn getInternalFormat(self: *const Texture) ?gl.textures.InternalFormat {
@@ -153,6 +161,7 @@ pub const Texture = opaque {
     /// Returns the base level width in texels.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Width as `i32`.
     pub fn getWidth(self: *const Texture) i32 {
@@ -161,6 +170,7 @@ pub const Texture = opaque {
     /// Returns the base level height in texels.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Height as `i32`.
     pub fn getHeight(self: *const Texture) i32 {
@@ -169,6 +179,7 @@ pub const Texture = opaque {
     /// Returns the base level depth in texels.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Depth as `i32`.
     pub fn getDepth(self: *const Texture) i32 {
@@ -177,6 +188,7 @@ pub const Texture = opaque {
     /// Returns the number of mipmap levels.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Level count as `i32`.
     pub fn getLevels(self: *const Texture) i32 {
@@ -185,6 +197,7 @@ pub const Texture = opaque {
     /// Returns the external pixel format, if known.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Optional pixel format.
     pub fn getPixelFormat(self: *const Texture) ?gl.textures.PixelFormat {
@@ -193,6 +206,7 @@ pub const Texture = opaque {
     /// Returns the pixel data type, if known.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Optional data type.
     pub fn getDataType(self: *const Texture) ?gl.enums.DataType {
@@ -201,6 +215,7 @@ pub const Texture = opaque {
     /// Returns the minification filter.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Minification filter enumeration.
     pub fn getMinFilter(self: *const Texture) gl.textures.TextureMinFilter {
@@ -209,6 +224,7 @@ pub const Texture = opaque {
     /// Returns the magnification filter.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Magnification filter enumeration.
     pub fn getMagFilter(self: *const Texture) gl.textures.TextureMagFilter {
@@ -217,6 +233,7 @@ pub const Texture = opaque {
     /// Returns the wrap mode for the S coordinate.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Wrap mode for S.
     pub fn getWrapS(self: *const Texture) gl.textures.TextureWrap {
@@ -225,6 +242,7 @@ pub const Texture = opaque {
     /// Returns the wrap mode for the T coordinate.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Wrap mode for T.
     pub fn getWrapT(self: *const Texture) gl.textures.TextureWrap {
@@ -233,6 +251,7 @@ pub const Texture = opaque {
     /// Returns the wrap mode for the R coordinate.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Wrap mode for R.
     pub fn getWrapR(self: *const Texture) gl.textures.TextureWrap {
@@ -241,6 +260,7 @@ pub const Texture = opaque {
     /// Returns the depth texture comparison mode.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Comparison mode enumeration.
     pub fn getCompareMode(self: *const Texture) gl.textures.CompareMode {
@@ -249,6 +269,7 @@ pub const Texture = opaque {
     /// Returns the depth comparison function.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Comparison function enumeration.
     pub fn getCompareFunc(self: *const Texture) gl.textures.CompareFunc {
@@ -257,6 +278,7 @@ pub const Texture = opaque {
     /// Returns the base mipmap level.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Base level as `i32`.
     pub fn getBaseLevel(self: *const Texture) i32 {
@@ -265,6 +287,7 @@ pub const Texture = opaque {
     /// Returns the maximum mipmap level.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Maximum level as `i32`.
     pub fn getMaxLevel(self: *const Texture) i32 {
@@ -273,6 +296,7 @@ pub const Texture = opaque {
     /// Returns the minimum level-of-detail value.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Minimum LOD as `f32`.
     pub fn getMinLod(self: *const Texture) f32 {
@@ -281,6 +305,7 @@ pub const Texture = opaque {
     /// Returns the maximum level-of-detail value.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Maximum LOD as `f32`.
     pub fn getMaxLod(self: *const Texture) f32 {
@@ -289,6 +314,7 @@ pub const Texture = opaque {
     /// Returns the swizzle component for the red channel.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Swizzle enumeration for red.
     pub fn getSwizzleR(self: *const Texture) gl.textures.Swizzle {
@@ -297,6 +323,7 @@ pub const Texture = opaque {
     /// Returns the swizzle component for the green channel.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Swizzle enumeration for green.
     pub fn getSwizzleG(self: *const Texture) gl.textures.Swizzle {
@@ -305,6 +332,7 @@ pub const Texture = opaque {
     /// Returns the swizzle component for the blue channel.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Swizzle enumeration for blue.
     pub fn getSwizzleB(self: *const Texture) gl.textures.Swizzle {
@@ -313,6 +341,7 @@ pub const Texture = opaque {
     /// Returns the swizzle component for the alpha channel.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Swizzle enumeration for alpha.
     pub fn getSwizzleA(self: *const Texture) gl.textures.Swizzle {
@@ -321,6 +350,7 @@ pub const Texture = opaque {
     /// Returns whether mipmaps have been generated.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - True if mipmaps were generated, false otherwise.
     pub fn getHasMipmap(self: *const Texture) bool {
@@ -329,6 +359,7 @@ pub const Texture = opaque {
     /// Returns the cached active texture unit.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Active texture unit enumeration.
     pub fn getActiveUnit(self: *const Texture) gl.textures.TextureUnit {
@@ -338,6 +369,7 @@ pub const Texture = opaque {
     /// Returns the texture dimensions as a struct.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Anonymous struct with fields `w`, `h`, `d` representing width, height and depth.
     pub fn getSize(self: *const Texture) struct { w: i32, h: i32, d: i32 } {
@@ -347,6 +379,7 @@ pub const Texture = opaque {
     /// Returns the four component swizzle values.
     /// Parameters:
     ///   - self: Texture to query.
+    ///
     /// Returns:
     ///   - Array of four `Swizzle` values in RGBA order.
     pub fn getSwizzle(self: *const Texture) [4]gl.textures.Swizzle {
@@ -357,6 +390,7 @@ pub const Texture = opaque {
     /// Binds the texture to its current target using the current active unit.
     /// Parameters:
     ///   - self: Texture to bind.
+    ///
     /// Returns:
     ///   - void.
     pub fn bind(self: *const Texture) void {
@@ -368,6 +402,7 @@ pub const Texture = opaque {
     /// Parameters:
     ///   - self: Texture to bind.
     ///   - unit: Texture unit to activate before binding.
+    ///
     /// Returns:
     ///   - void.
     pub fn bindToUnit(self: *const Texture, unit: gl.textures.TextureUnit) void {
@@ -377,6 +412,7 @@ pub const Texture = opaque {
     /// Alias for `bind`. Binds the texture to its target.
     /// Parameters:
     ///   - self: Texture to bind.
+    ///
     /// Returns:
     ///   - void.
     pub fn use(self: *const Texture) void {
@@ -386,6 +422,7 @@ pub const Texture = opaque {
     /// Parameters:
     ///   - self: Texture to bind.
     ///   - unit: Texture unit to activate.
+    ///
     /// Returns:
     ///   - void.
     pub fn useUnit(self: *const Texture, unit: gl.textures.TextureUnit) void {
@@ -396,6 +433,7 @@ pub const Texture = opaque {
     /// Parameters:
     ///   - self: Texture whose parameter to query.
     ///   - pname: Name of the texture parameter to query.
+    ///
     /// Returns:
     ///   - Integer value of the parameter.
     pub fn queryParameterI(self: *const Texture, pname: gl.textures.TextureParameter) i32 {
@@ -408,6 +446,7 @@ pub const Texture = opaque {
     /// Parameters:
     ///   - self: Texture whose parameter to query.
     ///   - pname: Name of the texture parameter to query.
+    ///
     /// Returns:
     ///   - Floating point value of the parameter.
     pub fn queryParameterF(self: *const Texture, pname: gl.textures.TextureParameter) f32 {
@@ -420,6 +459,7 @@ pub const Texture = opaque {
     /// Creates an `Editor` for deferred texture configuration.
     /// Parameters:
     ///   - self: Texture to edit.
+    ///
     /// Returns:
     ///   - Initialized `Editor` instance referencing this texture.
     pub fn edit(self: *Texture) Editor {
@@ -705,6 +745,7 @@ pub const Texture = opaque {
         /// Initializes an editor for the given texture.
         /// Parameters:
         ///   - texture: Texture to be edited; stored by reference.
+        ///
         /// Returns:
         ///   - Initialized `Editor` with no pending changes.
         pub fn init(texture: *Texture) Editor {
@@ -715,6 +756,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - target: New texture target to apply.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setTarget(self: *const Editor, target: gl.textures.TextureTarget) *const Editor {
@@ -725,6 +767,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - unit: Texture unit to activate on `apply`.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setActiveUnit(self: *const Editor, unit: gl.textures.TextureUnit) *const Editor {
@@ -739,6 +782,7 @@ pub const Texture = opaque {
         ///   - internalformat: Sized internal format.
         ///   - width: Width in texels.
         ///   - height: Height in texels.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setStorage2D(self: *const Editor, target: gl.textures.TextureTarget, levels: i32, internalformat: gl.textures.InternalFormat, width: i32, height: i32) *const Editor {
@@ -752,6 +796,7 @@ pub const Texture = opaque {
         ///   - internalformat: Sized internal format.
         ///   - width: Width in texels.
         ///   - height: Height in texels.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setStorage2DSimple(self: *const Editor, levels: i32, internalformat: gl.textures.InternalFormat, width: i32, height: i32) *const Editor {
@@ -767,6 +812,7 @@ pub const Texture = opaque {
         ///   - width: Width in texels.
         ///   - height: Height in texels.
         ///   - depth: Depth in texels.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setStorage3D(self: *const Editor, target: gl.textures.TextureTarget, levels: i32, internalformat: gl.textures.InternalFormat, width: i32, height: i32, depth: i32) *const Editor {
@@ -785,6 +831,7 @@ pub const Texture = opaque {
         ///   - format: External pixel format.
         ///   - kind: Data type of pixel data.
         ///   - pixels: Pointer to pixel data or null.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setImage2D(self: *const Editor, target: gl.textures.TextureTarget, level: i32, internalformat: gl.textures.InternalFormat, width: i32, height: i32, border: i32, format: gl.textures.PixelFormat, kind: gl.enums.DataType, pixels: ?*const anyopaque) *const Editor {
@@ -804,6 +851,7 @@ pub const Texture = opaque {
         ///   - format: External pixel format.
         ///   - kind: Data type of pixel data.
         ///   - pixels: Pointer to pixel data or null.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setImage3D(self: *const Editor, target: gl.textures.TextureTarget, level: i32, internalformat: gl.textures.InternalFormat, width: i32, height: i32, depth: i32, border: i32, format: gl.textures.PixelFormat, kind: gl.enums.DataType, pixels: ?*const anyopaque) *const Editor {
@@ -822,6 +870,7 @@ pub const Texture = opaque {
         ///   - format: External pixel format.
         ///   - kind: Data type of pixel data.
         ///   - pixels: Pointer to pixel data or null.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setSubImage2D(self: *const Editor, target: gl.textures.TextureTarget, level: i32, xoffset: i32, yoffset: i32, width: i32, height: i32, format: gl.textures.PixelFormat, kind: gl.enums.DataType, pixels: ?*const anyopaque) *const Editor {
@@ -842,6 +891,7 @@ pub const Texture = opaque {
         ///   - format: External pixel format.
         ///   - kind: Data type of pixel data.
         ///   - pixels: Pointer to pixel data or null.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setSubImage3D(self: *const Editor, target: gl.textures.TextureTarget, level: i32, xoffset: i32, yoffset: i32, zoffset: i32, width: i32, height: i32, depth: i32, format: gl.textures.PixelFormat, kind: gl.enums.DataType, pixels: ?*const anyopaque) *const Editor {
@@ -859,6 +909,7 @@ pub const Texture = opaque {
         ///   - border: Border width.
         ///   - image_size: Size of compressed data in bytes.
         ///   - data: Pointer to compressed data or null.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setCompressedImage2D(self: *const Editor, target: gl.textures.TextureTarget, level: i32, internalformat: gl.textures.InternalFormat, width: i32, height: i32, border: i32, image_size: i32, data: ?*const anyopaque) *const Editor {
@@ -877,6 +928,7 @@ pub const Texture = opaque {
         ///   - border: Border width.
         ///   - image_size: Size of compressed data in bytes.
         ///   - data: Pointer to compressed data or null.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setCompressedImage3D(self: *const Editor, target: gl.textures.TextureTarget, level: i32, internalformat: gl.textures.InternalFormat, width: i32, height: i32, depth: i32, border: i32, image_size: i32, data: ?*const anyopaque) *const Editor {
@@ -894,6 +946,7 @@ pub const Texture = opaque {
         ///   - width: Width of the region to copy.
         ///   - height: Height of the region to copy.
         ///   - border: Border width.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setCopyImage2D(self: *const Editor, target: gl.textures.TextureTarget, level: i32, internalformat: gl.textures.InternalFormat, x: i32, y: i32, width: i32, height: i32, border: i32) *const Editor {
@@ -911,6 +964,7 @@ pub const Texture = opaque {
         ///   - y: Window Y coordinate to copy from.
         ///   - width: Width of the region.
         ///   - height: Height of the region.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setCopySubImage2D(self: *const Editor, target: gl.textures.TextureTarget, level: i32, xoffset: i32, yoffset: i32, x: i32, y: i32, width: i32, height: i32) *const Editor {
@@ -929,6 +983,7 @@ pub const Texture = opaque {
         ///   - y: Window Y coordinate to copy from.
         ///   - width: Width of the region.
         ///   - height: Height of the region.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setCopySubImage3D(self: *const Editor, target: gl.textures.TextureTarget, level: i32, xoffset: i32, yoffset: i32, zoffset: i32, x: i32, y: i32, width: i32, height: i32) *const Editor {
@@ -939,6 +994,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - filter: New minification filter.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setMinFilter(self: *const Editor, filter: gl.textures.TextureMinFilter) *const Editor {
@@ -949,6 +1005,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - filter: New magnification filter.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setMagFilter(self: *const Editor, filter: gl.textures.TextureMagFilter) *const Editor {
@@ -959,6 +1016,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - wrap: New wrap mode for S.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setWrapS(self: *const Editor, wrap: gl.textures.TextureWrap) *const Editor {
@@ -969,6 +1027,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - wrap: New wrap mode for T.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setWrapT(self: *const Editor, wrap: gl.textures.TextureWrap) *const Editor {
@@ -979,6 +1038,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - wrap: New wrap mode for R.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setWrapR(self: *const Editor, wrap: gl.textures.TextureWrap) *const Editor {
@@ -990,6 +1050,7 @@ pub const Texture = opaque {
         ///   - self: Editor instance.
         ///   - s: Wrap mode for S.
         ///   - t: Wrap mode for T.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setWrap(self: *const Editor, s: gl.textures.TextureWrap, t: gl.textures.TextureWrap) *const Editor {
@@ -1003,6 +1064,7 @@ pub const Texture = opaque {
         ///   - s: Wrap mode for S.
         ///   - t: Wrap mode for T.
         ///   - r: Wrap mode for R.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setWrapSTR(self: *const Editor, s: gl.textures.TextureWrap, t: gl.textures.TextureWrap, r: gl.textures.TextureWrap) *const Editor {
@@ -1015,6 +1077,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - mode: New comparison mode.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setCompareMode(self: *const Editor, mode: gl.textures.CompareMode) *const Editor {
@@ -1025,6 +1088,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - func: New comparison function.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setCompareFunc(self: *const Editor, func: gl.textures.CompareFunc) *const Editor {
@@ -1035,6 +1099,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - level: New base level.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setBaseLevel(self: *const Editor, level: i32) *const Editor {
@@ -1045,6 +1110,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - level: New maximum level.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setMaxLevel(self: *const Editor, level: i32) *const Editor {
@@ -1055,6 +1121,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - lod: New minimum LOD.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setMinLod(self: *const Editor, lod: f32) *const Editor {
@@ -1065,6 +1132,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - lod: New maximum LOD.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setMaxLod(self: *const Editor, lod: f32) *const Editor {
@@ -1075,6 +1143,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - swizzle: New swizzle value for red.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setSwizzleR(self: *const Editor, swizzle: gl.textures.Swizzle) *const Editor {
@@ -1085,6 +1154,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - swizzle: New swizzle value for green.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setSwizzleG(self: *const Editor, swizzle: gl.textures.Swizzle) *const Editor {
@@ -1095,6 +1165,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - swizzle: New swizzle value for blue.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setSwizzleB(self: *const Editor, swizzle: gl.textures.Swizzle) *const Editor {
@@ -1105,6 +1176,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - swizzle: New swizzle value for alpha.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setSwizzleA(self: *const Editor, swizzle: gl.textures.Swizzle) *const Editor {
@@ -1118,6 +1190,7 @@ pub const Texture = opaque {
         ///   - g: Swizzle for green channel.
         ///   - b: Swizzle for blue channel.
         ///   - a: Swizzle for alpha channel.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setSwizzle(self: *const Editor, r: gl.textures.Swizzle, g: gl.textures.Swizzle, b: gl.textures.Swizzle, a: gl.textures.Swizzle) *const Editor {
@@ -1131,6 +1204,7 @@ pub const Texture = opaque {
         /// Parameters:
         ///   - self: Editor instance.
         ///   - gen: True to generate mipmaps, false to skip.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setGenerateMipmap(self: *const Editor, gen: bool) *const Editor {
@@ -1142,6 +1216,7 @@ pub const Texture = opaque {
         ///   - self: Editor instance.
         ///   - pname: Parameter name.
         ///   - param: Integer value to set.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setParameterI(self: *const Editor, pname: gl.textures.TextureParameter, param: i32) *const Editor {
@@ -1153,6 +1228,7 @@ pub const Texture = opaque {
         ///   - self: Editor instance.
         ///   - pname: Parameter name.
         ///   - param: Floating point value to set.
+        ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
         pub fn setParameterF(self: *const Editor, pname: gl.textures.TextureParameter, param: f32) *const Editor {
@@ -1166,6 +1242,7 @@ pub const Texture = opaque {
         /// and generic parameters, generates mipmaps if requested, and resets the editor.
         /// Parameters:
         ///   - self: Editor instance holding pending changes.
+        ///
         /// Returns:
         ///   - void.
         pub fn apply(self: *const Editor) void {

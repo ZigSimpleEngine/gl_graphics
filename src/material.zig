@@ -9,6 +9,7 @@ const gpu_meta = @import("gpu_meta.zig");
 /// The material stores vertex and fragment uniforms and applies them via editors.
 /// Parameters:
 /// - shader_program_: shader program type providing Vert and optional Frag descriptors.
+///
 /// Returns: opaque material type specialized for the program.
 pub fn Material(comptime shader_program_: type) type {
     const has_frag = shader_program_.HasFrag;
@@ -40,6 +41,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// Returns mutable implementation pointer.
         /// Parameters:
         /// - self: material pointer.
+        ///
         /// Returns: mutable Impl pointer.
         inline fn impl(self: *Self) *Impl {
             return @ptrCast(@alignCast(self));
@@ -47,6 +49,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// Returns immutable implementation pointer.
         /// Parameters:
         /// - self: const material pointer.
+        ///
         /// Returns: const Impl pointer.
         inline fn implConst(self: *const Self) *const Impl {
             return @ptrCast(@alignCast(self));
@@ -55,6 +58,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// Creates a new material instance.
         /// Parameters:
         /// - allocator: allocator for storage and program instance.
+        ///
         /// Returns: pointer to created material or error.
         pub fn create(allocator: std.mem.Allocator) !*Self {
             const m = try allocator.create(Impl);
@@ -66,6 +70,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// Parameters:
         /// - self: material to destroy.
         /// - allocator: allocator used for creation.
+        ///
         /// Returns: void.
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
             allocator.destroy(self.impl());
@@ -74,6 +79,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// Returns a copy of the cached vertex uniform.
         /// Parameters:
         /// - self: const material pointer.
+        ///
         /// Returns: vertex uniform value.
         pub fn getVertUniform(self: *const Self) VertUniform {
             return self.implConst().vertUniform;
@@ -81,6 +87,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// Returns a copy of the cached fragment uniform.
         /// Parameters:
         /// - self: const material pointer.
+        ///
         /// Returns: fragment uniform value.
         pub fn getFragUniform(self: *const Self) FragUniform {
             return self.implConst().fragUniform;
@@ -89,6 +96,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// Parameters:
         /// - self: material pointer.
         /// - u: new vertex uniform value.
+        ///
         /// Returns: void.
         pub fn setVertUniform(self: *Self, u: VertUniform) void {
             self.impl().vertUniform = u;
@@ -97,6 +105,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// Parameters:
         /// - self: material pointer.
         /// - u: new fragment uniform value.
+        ///
         /// Returns: void.
         pub fn setFragUniform(self: *Self, u: FragUniform) void {
             self.impl().fragUniform = u;
@@ -110,6 +119,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// Parameters:
         /// - field_name: comptime field name to find.
         /// - F: comptime expected field type.
+        ///
         /// Returns: field id, `FieldNotFound` or `FieldTypeMismatch`.
         pub fn getVertUniformFieldId(comptime field_name: []const u8, comptime F: type) UniformFieldError!u32 {
             return gpu_meta.uniformFieldIdByName(comptime gpu_meta.uniformFields(VertUniform), field_name, gpu_meta.typeId(F));
@@ -120,6 +130,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// - self: material pointer.
         /// - field_id: id from `getVertUniformFieldId`.
         /// - data: value whose type must match the field type.
+        ///
         /// Returns: `UnknownFieldId` or `FieldTypeMismatch`/`SizeMismatch` on failure.
         pub fn setVertUniformData(self: *Self, field_id: u32, data: anytype) UniformFieldError!void {
             const fields = comptime gpu_meta.uniformFields(VertUniform);
@@ -132,6 +143,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// - self: material pointer.
         /// - field_id: id from `getVertUniformFieldId`.
         /// - T: comptime expected field type.
+        ///
         /// Returns: field value copy, or `UnknownFieldId`/`FieldTypeMismatch` on failure.
         pub fn getVertUniformData(self: *Self, field_id: u32, comptime T: type) UniformFieldError!T {
             const fields = comptime gpu_meta.uniformFields(VertUniform);
@@ -147,6 +159,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// Parameters:
         /// - field_name: comptime field name to find.
         /// - F: comptime expected field type.
+        ///
         /// Returns: field id, `FieldNotFound` or `FieldTypeMismatch`.
         pub fn getFragUniformFieldId(comptime field_name: []const u8, comptime F: type) UniformFieldError!u32 {
             return gpu_meta.uniformFieldIdByName(comptime gpu_meta.uniformFields(FragUniform), field_name, gpu_meta.typeId(F));
@@ -157,6 +170,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// - self: material pointer.
         /// - field_id: id from `getFragUniformFieldId`.
         /// - data: value whose type must match the field type.
+        ///
         /// Returns: `UnknownFieldId` or `FieldTypeMismatch`/`SizeMismatch` on failure.
         pub fn setFragUniformData(self: *Self, field_id: u32, data: anytype) UniformFieldError!void {
             const fields = comptime gpu_meta.uniformFields(FragUniform);
@@ -169,6 +183,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// - self: material pointer.
         /// - field_id: id from `getFragUniformFieldId`.
         /// - T: comptime expected field type.
+        ///
         /// Returns: field value copy, or `UnknownFieldId`/`FieldTypeMismatch` on failure.
         pub fn getFragUniformData(self: *Self, field_id: u32, comptime T: type) UniformFieldError!T {
             const fields = comptime gpu_meta.uniformFields(FragUniform);
@@ -182,6 +197,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// Returns the associated shader program if present.
         /// Parameters:
         /// - self: const material pointer.
+        ///
         /// Returns: optional program pointer.
         pub fn getProgram(self: *const Self) ?*ShaderProgram {
             return self.implConst().program;
@@ -193,6 +209,7 @@ pub fn Material(comptime shader_program_: type) type {
         /// before calling `use`, e.g. from an explicit ECS system.
         /// Parameters:
         /// - self: material pointer.
+        ///
         /// Returns: void.
         pub fn use(self: *Self) void {
             const m = self.impl();

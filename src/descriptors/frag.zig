@@ -19,6 +19,7 @@ pub const FragmentDescriptor = struct {
     /// - ptr: opaque descriptor pointer unused.
     /// - init: process init context unused.
     /// - data: descriptor data containing node to test.
+    ///
     /// Returns: true when node is a .frag file.
     pub fn isSuitableData(ptr: *anyopaque, init: std.process.Init, data: Descriptor.Data) anyerror!bool {
         _ = ptr;
@@ -34,6 +35,7 @@ pub const FragmentDescriptor = struct {
     /// - ptr: opaque descriptor pointer to self.
     /// - init: process init providing allocators and IO.
     /// - data: descriptor data with node, depth and path info.
+    ///
     /// Returns: allocated Zig source string.
     pub fn getCode(ptr: *anyopaque, init: std.process.Init, data: Descriptor.Data) anyerror![]u8 {
         const self: *FragmentDescriptor = @ptrCast(@alignCast(ptr));
@@ -311,6 +313,7 @@ pub const FragmentDescriptor = struct {
     /// Returns a Descriptor vtable for this fragment descriptor.
     /// Parameters:
     /// - self: pointer to descriptor instance.
+    ///
     /// Returns: Descriptor with vtable.
     pub fn descriptor(self: *FragmentDescriptor) Descriptor {
         return .{ .ptr = self, .vtable = .{ .get_code = getCode, .is_suitable_data = isSuitableData } };
@@ -320,6 +323,7 @@ pub const FragmentDescriptor = struct {
 /// Returns true when any uniform is a block type.
 /// Parameters:
 /// - uniforms: slice of uniform definitions.
+///
 /// Returns: true if any block uniform exists.
 fn blk_has(uniforms: []common.UniformDef) bool {
     for (uniforms) |u| if (u.kind == .block) return true;

@@ -10,6 +10,7 @@ const gpu_meta = @import("gpu_meta.zig");
 /// Returns true when `T` is a math vector type (`math.Vec`).
 /// Parameters:
 /// - T: type to test.
+///
 /// Returns: true for vector types.
 fn isVecType(comptime T: type) bool {
     return @typeInfo(T) == .@"struct" and @hasDecl(T, "len") and @hasDecl(T, "value_type");
@@ -18,6 +19,7 @@ fn isVecType(comptime T: type) bool {
 /// Returns true when `T` is a math matrix type (`math.Mat`).
 /// Parameters:
 /// - T: type to test.
+///
 /// Returns: true for matrix types.
 fn isMatType(comptime T: type) bool {
     return @typeInfo(T) == .@"struct" and @hasDecl(T, "cols") and @hasDecl(T, "rows");
@@ -29,6 +31,7 @@ fn isMatType(comptime T: type) bool {
 /// - loc: uniform location.
 /// - T: value type.
 /// - value: value to upload.
+///
 /// Returns: void.
 pub fn uploadUniformValue(loc: i32, comptime T: type, value: T) void {
     if (comptime isVecType(T)) {
@@ -99,6 +102,7 @@ pub fn uploadUniformValue(loc: i32, comptime T: type, value: T) void {
 /// - prefix: dotted name prefix (empty for top level).
 /// - T: struct type to flatten.
 /// - value: struct value to upload.
+///
 /// Returns: void.
 pub fn flattenUniforms(program: u32, comptime prefix: []const u8, comptime T: type, value: T) void {
     inline for (@typeInfo(T).@"struct".fields) |f| {
@@ -127,6 +131,7 @@ pub fn flattenUniforms(program: u32, comptime prefix: []const u8, comptime T: ty
 /// - pending: pending uniform values.
 /// - set_all: true to upload every uniform regardless of dirty flags.
 /// - dirty: pointer to a struct mirroring `UniformT` field names with bools.
+///
 /// Returns: void.
 pub fn applyUniforms(
     comptime UniformT: type,
@@ -177,6 +182,7 @@ pub fn applyUniforms(
 /// Parameters:
 /// - kind: shader stage type.
 /// - src: GLSL source text.
+///
 /// Returns: created shader id.
 pub fn compileShaderSource(kind: gl.shaders.ShaderType, src: []const u8) u32 {
     const shader = gl.shaders.create(kind);
@@ -196,6 +202,7 @@ pub fn compileShaderSource(kind: gl.shaders.ShaderType, src: []const u8) u32 {
 /// Parameters:
 /// - id: pointer to the stored shader id.
 /// - initialized: pointer to the stored initialization flag.
+///
 /// Returns: void.
 pub fn disposeShader(id: *u32, initialized: *bool) void {
     if (id.* != 0) {
@@ -216,6 +223,7 @@ pub fn disposeShader(id: *u32, initialized: *bool) void {
 /// - loc: uniform location (must be valid for the current program).
 /// - kind: upload classification of the field.
 /// - bytes: exactly `uniformKindSize(kind)` bytes in native field layout.
+///
 /// Returns: `SizeMismatch` / `UnsupportedUniformField` on validation failure.
 pub fn uploadUniformByKind(loc: i32, kind: gpu_meta.UniformKind, bytes: []const u8) gpu_meta.ResourceError!void {
     if (kind == .other) return error.UnsupportedUniformField;

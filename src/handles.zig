@@ -37,6 +37,7 @@ pub const UniformFieldItem = struct {
 /// - it: pending write to validate.
 /// - check_uploadable: when true, resource kinds (sampler/block/nested)
 ///   are rejected for direct GL upload; cache writes pass false.
+///
 /// Returns: `UnknownFieldId` / `FieldTypeMismatch` / `UnsupportedUniformField` / `SizeMismatch`.
 fn validateUniformItem(fields: []const gpu_meta.UniformFieldDesc, it: UniformFieldItem, check_uploadable: bool) gpu_meta.ResourceError!void {
     if (it.field_id >= fields.len) return error.UnknownFieldId;
@@ -97,6 +98,7 @@ pub const AnyBuffer = struct {
     /// destroy exactly once via `remove` + `destroy`.
     /// Parameters:
     /// - ptr: `*Buffer(T)` for any `T`.
+    ///
     /// Returns: type-erased record.
     pub fn wrap(ptr: anytype) AnyBuffer {
         const B = std.meta.Child(@TypeOf(ptr));
@@ -290,6 +292,7 @@ pub const AnyBuffer = struct {
         /// Flushes all pending operations in one underlying edit/apply cycle.
         /// Parameters:
         /// - self: editor holding pending operations.
+        ///
         /// Returns: void.
         pub fn apply(self: *const Editor) void {
             self.rec.editor_apply_fn(self);
@@ -299,6 +302,7 @@ pub const AnyBuffer = struct {
     /// Creates an `Editor` for batched buffer updates.
     /// Parameters:
     /// - self: buffer record to edit (copied; immune to pool reallocations).
+    ///
     /// Returns: initialized `Editor` with no pending changes.
     pub fn edit(self: *const AnyBuffer) Editor {
         return .{ .rec = self.* };
@@ -308,6 +312,7 @@ pub const AnyBuffer = struct {
     /// Parameters:
     /// - self: record to downcast.
     /// - T: expected element type.
+    ///
     /// Returns: `*Buffer(T)` or null.
     pub fn cast(self: *AnyBuffer, comptime T: type) ?*Buffer(T) {
         if (self.elem_size != @sizeOf(T)) return null;
@@ -457,6 +462,7 @@ pub const AnyMesh = struct {
     /// Wraps a typed mesh pointer. The record does not take ownership.
     /// Parameters:
     /// - ptr: `*Mesh(Vertex)` for any `Vertex`.
+    ///
     /// Returns: type-erased record.
     pub fn wrap(ptr: anytype) AnyMesh {
         const M = std.meta.Child(@TypeOf(ptr));
@@ -636,6 +642,7 @@ pub const AnyMesh = struct {
         /// Flushes all pending operations in one underlying edit/apply cycle.
         /// Parameters:
         /// - self: editor holding pending operations.
+        ///
         /// Returns: void.
         pub fn apply(self: *const Editor) void {
             self.rec.editor_apply_fn(self);
@@ -645,6 +652,7 @@ pub const AnyMesh = struct {
     /// Creates an `Editor` for batched mesh updates.
     /// Parameters:
     /// - self: mesh record to edit (copied; immune to pool reallocations).
+    ///
     /// Returns: initialized `Editor` with no pending changes.
     pub fn edit(self: *const AnyMesh) Editor {
         return .{ .rec = self.* };
@@ -654,6 +662,7 @@ pub const AnyMesh = struct {
     /// Parameters:
     /// - self: record to downcast.
     /// - V: expected vertex type.
+    ///
     /// Returns: `*Mesh(V)` or null.
     pub fn cast(self: *AnyMesh, comptime V: type) ?*Mesh(V) {
         if (self.stride != @sizeOf(V)) return null;
@@ -772,6 +781,7 @@ pub const AnyProgram = struct {
     /// Wraps a typed program pointer. The record does not take ownership.
     /// Parameters:
     /// - ptr: `*ShaderProgram(Vert, Frag)` for any descriptors.
+    ///
     /// Returns: type-erased record.
     pub fn wrap(ptr: anytype) AnyProgram {
         const P = std.meta.Child(@TypeOf(ptr));
@@ -862,6 +872,7 @@ pub const AnyProgram = struct {
     /// - self: record to downcast.
     /// - V: expected vertex descriptor type.
     /// - F: expected fragment descriptor type (`null` for vertex-only programs).
+    ///
     /// Returns: `*ShaderProgram(V, F)` or null.
     pub fn cast(self: *AnyProgram, comptime V: type, comptime F: ?type) ?*ShaderProgram(V, F) {
         if (!std.mem.eql(u8, self.vert_name, @typeName(V))) return null;
@@ -922,6 +933,7 @@ pub const AnyProgram = struct {
         /// Parameters:
         /// - self: editor instance.
         /// - items: borrowed field writes applied in order.
+        ///
         /// Returns: `*const Editor` for chaining.
         pub fn setVertUniformFields(self: *const Editor, items: []const UniformFieldItem) *const Editor {
             @constCast(self)._pending_vert = items;
@@ -931,6 +943,7 @@ pub const AnyProgram = struct {
         /// Parameters:
         /// - self: editor instance.
         /// - items: borrowed field writes applied in order.
+        ///
         /// Returns: `*const Editor` for chaining.
         pub fn setFragUniformFields(self: *const Editor, items: []const UniformFieldItem) *const Editor {
             @constCast(self)._pending_frag = items;
@@ -939,6 +952,7 @@ pub const AnyProgram = struct {
         /// Validates the whole batch, binds the program once, uploads all.
         /// Parameters:
         /// - self: editor holding pending writes.
+        ///
         /// Returns: validation error before any GL call, if the batch is bad.
         pub fn apply(self: *const Editor) gpu_meta.ResourceError!void {
             for (self._pending_vert) |it| try validateUniformItem(self.vert_fields, it, true);
@@ -957,6 +971,7 @@ pub const AnyProgram = struct {
     /// Creates an `Editor` for batched uniform uploads.
     /// Parameters:
     /// - self: program record to edit (copied; immune to pool reallocations).
+    ///
     /// Returns: initialized `Editor` with no pending writes.
     pub fn edit(self: *const AnyProgram) Editor {
         return .{ .rec = self.*, .vert_fields = self.vert_fields, .frag_fields = self.frag_fields };
@@ -1005,6 +1020,7 @@ pub const AnyMaterial = struct {
     /// Wraps a typed material pointer. The record does not take ownership.
     /// Parameters:
     /// - ptr: `*Material(Program)` for any program.
+    ///
     /// Returns: type-erased record.
     pub fn wrap(ptr: anytype) AnyMaterial {
         const M = std.meta.Child(@TypeOf(ptr));
@@ -1116,6 +1132,7 @@ pub const AnyMaterial = struct {
     /// Parameters:
     /// - self: record to downcast.
     /// - Prog: expected shader program type.
+    ///
     /// Returns: `*Material(Prog)` or null.
     pub fn cast(self: *AnyMaterial, comptime Prog: type) ?*Material(Prog) {
         if (!std.mem.eql(u8, self.program_name, @typeName(Prog))) return null;
@@ -1198,6 +1215,7 @@ pub const AnyMaterial = struct {
         /// Parameters:
         /// - self: editor instance.
         /// - items: borrowed field writes applied in order.
+        ///
         /// Returns: `*const Editor` for chaining.
         pub fn setVertUniformFields(self: *const Editor, items: []const UniformFieldItem) *const Editor {
             @constCast(self)._pending_vert = items;
@@ -1207,6 +1225,7 @@ pub const AnyMaterial = struct {
         /// Parameters:
         /// - self: editor instance.
         /// - items: borrowed field writes applied in order.
+        ///
         /// Returns: `*const Editor` for chaining.
         pub fn setFragUniformFields(self: *const Editor, items: []const UniformFieldItem) *const Editor {
             @constCast(self)._pending_frag = items;
@@ -1215,6 +1234,7 @@ pub const AnyMaterial = struct {
         /// Validates the whole batch, then commits all writes atomically.
         /// Parameters:
         /// - self: editor holding pending writes.
+        ///
         /// Returns: validation error with the cache untouched, if the batch is bad.
         pub fn apply(self: *const Editor) gpu_meta.ResourceError!void {
             for (self._pending_vert) |it| try validateUniformItem(self.vert_fields, it, false);
@@ -1229,6 +1249,7 @@ pub const AnyMaterial = struct {
     /// Creates an `Editor` for atomic cache writes.
     /// Parameters:
     /// - self: material record to edit (copied; immune to pool reallocations).
+    ///
     /// Returns: initialized `Editor` with no pending writes.
     pub fn edit(self: *const AnyMaterial) Editor {
         return .{ .rec = self.*, .vert_fields = self.vert_fields, .frag_fields = self.frag_fields };
@@ -1240,6 +1261,7 @@ pub const AnyMaterial = struct {
 /// Parameters:
 /// - mesh: type-erased mesh.
 /// - prog: type-erased program.
+///
 /// Returns: true on compatibility.
 pub fn meshAcceptsProgram(mesh: *const AnyMesh, prog: *const AnyProgram) bool {
     return gpu_meta.fieldsSatisfiedBy(prog.vertex_inputs, mesh.vertex.fields);
@@ -1250,6 +1272,7 @@ pub fn meshAcceptsProgram(mesh: *const AnyMesh, prog: *const AnyProgram) bool {
 /// Parameters:
 /// - mat: type-erased material.
 /// - mesh: type-erased mesh.
+///
 /// Returns: true on compatibility (also usable in the reverse direction).
 pub fn materialAcceptsMesh(mat: *const AnyMaterial, mesh: *const AnyMesh) bool {
     return gpu_meta.fieldsSatisfiedBy(mat.vertex_inputs, mesh.vertex.fields);

@@ -50,6 +50,7 @@ pub const UniformDef = struct {
 /// Checks whether a byte is whitespace.
 /// Parameters:
 /// - c: byte to test.
+///
 /// Returns: true if whitespace.
 pub fn isWhitespace(c: u8) bool {
     return c == ' ' or c == '\t' or c == '\r' or c == '\n';
@@ -57,6 +58,7 @@ pub fn isWhitespace(c: u8) bool {
 /// Checks whether a byte is an alphabetic character or underscore.
 /// Parameters:
 /// - c: byte to test.
+///
 /// Returns: true if alpha or underscore.
 pub fn isAlpha(c: u8) bool {
     return (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or c == '_';
@@ -64,6 +66,7 @@ pub fn isAlpha(c: u8) bool {
 /// Checks whether a byte is alphanumeric or underscore.
 /// Parameters:
 /// - c: byte to test.
+///
 /// Returns: true if alnum or underscore.
 pub fn isAlnum(c: u8) bool {
     return isAlpha(c) or (c >= '0' and c <= '9');
@@ -71,6 +74,7 @@ pub fn isAlnum(c: u8) bool {
 /// Checks whether a byte is a decimal digit.
 /// Parameters:
 /// - c: byte to test.
+///
 /// Returns: true if digit.
 pub fn isDigit(c: u8) bool {
     return c >= '0' and c <= '9';
@@ -80,6 +84,7 @@ pub fn isDigit(c: u8) bool {
 /// Parameters:
 /// - s: source slice.
 /// - i: starting index.
+///
 /// Returns: index of first non-whitespace or length.
 pub fn skipSpaces(s: []const u8, i: usize) usize {
     var j = i;
@@ -92,6 +97,7 @@ pub fn skipSpaces(s: []const u8, i: usize) usize {
 /// Parameters:
 /// - allocator: allocator for output.
 /// - source: source text to strip.
+///
 /// Returns: newly allocated stripped string.
 pub fn stripComments(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
     var out = std.ArrayList(u8).empty;
@@ -117,6 +123,7 @@ pub fn stripComments(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
 /// Parameters:
 /// - allocator: allocator for output.
 /// - source: source text.
+///
 /// Returns: newly allocated string with layouts replaced by spaces.
 pub fn stripLayouts(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
     var out = std.ArrayList(u8).empty;
@@ -154,6 +161,7 @@ pub fn stripLayouts(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
 /// Parameters:
 /// - allocator: allocator for result.
 /// - glsl_type: GLSL type string.
+///
 /// Returns: newly allocated Zig type string.
 pub fn mapGLSLTypeToZig(allocator: std.mem.Allocator, glsl_type: []const u8) ![]u8 {
     if (std.mem.startsWith(u8, glsl_type, "sampler")) {
@@ -198,6 +206,7 @@ pub fn mapGLSLTypeToZig(allocator: std.mem.Allocator, glsl_type: []const u8) ![]
 /// Returns true when the type name denotes a sampler.
 /// Parameters:
 /// - t: type name to test.
+///
 /// Returns: true if sampler type.
 pub fn isSamplerType(t: []const u8) bool {
     return std.mem.startsWith(u8, t, "sampler");
@@ -207,6 +216,7 @@ pub fn isSamplerType(t: []const u8) bool {
 /// Parameters:
 /// - allocator: allocator for results.
 /// - source: source text stripped of comments.
+///
 /// Returns: slice of StructDef values.
 pub fn parseStructs(allocator: std.mem.Allocator, source: []const u8) ![]StructDef {
     var list = std.ArrayList(StructDef).empty;
@@ -312,6 +322,7 @@ pub fn parseStructs(allocator: std.mem.Allocator, source: []const u8) ![]StructD
 /// Parameters:
 /// - allocator: allocator for results.
 /// - source: source text.
+///
 /// Returns: slice of FieldDef values representing inputs.
 pub fn parseIns(allocator: std.mem.Allocator, source: []const u8) ![]FieldDef {
     var list = std.ArrayList(FieldDef).empty;
@@ -360,6 +371,7 @@ pub fn parseIns(allocator: std.mem.Allocator, source: []const u8) ![]FieldDef {
 /// Parameters:
 /// - allocator: allocator for results.
 /// - source: source text.
+///
 /// Returns: slice of UniformDef values.
 pub fn parseUniforms(allocator: std.mem.Allocator, source: []const u8) ![]UniformDef {
     var list = std.ArrayList(UniformDef).empty;
@@ -531,6 +543,7 @@ pub fn parseUniforms(allocator: std.mem.Allocator, source: []const u8) ![]Unifor
 /// Parameters:
 /// - allocator: allocator that was used.
 /// - structs: slice to free.
+///
 /// Returns: void.
 pub fn freeStructs(allocator: std.mem.Allocator, structs: []StructDef) void {
     for (structs) |*s| {
@@ -548,6 +561,7 @@ pub fn freeStructs(allocator: std.mem.Allocator, structs: []StructDef) void {
 /// Parameters:
 /// - allocator: allocator that was used.
 /// - uniforms: slice to free.
+///
 /// Returns: void.
 pub fn freeUniforms(allocator: std.mem.Allocator, uniforms: []UniformDef) void {
     for (uniforms) |*u| {
@@ -568,6 +582,7 @@ pub fn freeUniforms(allocator: std.mem.Allocator, uniforms: []UniformDef) void {
 /// Parameters:
 /// - allocator: allocator that was used.
 /// - fields: slice to free.
+///
 /// Returns: void.
 pub fn freeFields(allocator: std.mem.Allocator, fields: []FieldDef) void {
     for (fields) |f| {
@@ -582,6 +597,7 @@ pub fn freeFields(allocator: std.mem.Allocator, fields: []FieldDef) void {
 /// - allocator: allocator for result.
 /// - io: Io interface for file operations.
 /// - nodePath: relative node path to locate.
+///
 /// Returns: optional file content or null if not found.
 pub fn readNodeFile(allocator: std.mem.Allocator, io: std.Io, nodePath: []const u8) !?[]u8 {
     var cwd = std.Io.Dir.cwd();
@@ -637,6 +653,7 @@ pub fn readNodeFile(allocator: std.mem.Allocator, io: std.Io, nodePath: []const 
 /// - allocator: allocator for result.
 /// - baseFilePath: path of the including file.
 /// - includeRaw: raw include string.
+///
 /// Returns: newly allocated resolved path.
 pub fn resolveIncludePath(allocator: std.mem.Allocator, baseFilePath: []const u8, includeRaw: []const u8) ![]u8 {
     if (std.fs.path.isAbsolute(includeRaw)) return allocator.dupe(u8, includeRaw);
@@ -727,6 +744,7 @@ fn processShaderFile(
 /// - main_path: path of the main shader file.
 /// - visited: set of already-included paths (caller owned).
 /// - link_map: struct name -> owning .glsl identifier registry.
+///
 /// Returns: void.
 pub fn resolveShaderIncludes(
     gpa: std.mem.Allocator,

@@ -19,6 +19,7 @@ pub const GlslDescriptor = struct {
     /// - ptr: opaque descriptor pointer unused.
     /// - init: process init context unused.
     /// - data: descriptor data containing node to test.
+    ///
     /// Returns: true when node is a .glsl file.
     pub fn isSuitableData(ptr: *anyopaque, init: std.process.Init, data: Descriptor.Data) anyerror!bool {
         _ = ptr;
@@ -36,6 +37,7 @@ pub const GlslDescriptor = struct {
     /// - ptr: opaque descriptor pointer to self.
     /// - init: process init providing allocators and IO.
     /// - data: descriptor data with node, depth and path info.
+    ///
     /// Returns: allocated Zig source string.
     pub fn getCode(ptr: *anyopaque, init: std.process.Init, data: Descriptor.Data) anyerror![]u8 {
         const self: *GlslDescriptor = @ptrCast(@alignCast(ptr));
@@ -121,6 +123,7 @@ pub const GlslDescriptor = struct {
     /// Returns a Descriptor vtable for this GLSL descriptor.
     /// Parameters:
     /// - self: pointer to descriptor instance.
+    ///
     /// Returns: Descriptor with vtable.
     pub fn descriptor(self: *GlslDescriptor) Descriptor {
         return .{

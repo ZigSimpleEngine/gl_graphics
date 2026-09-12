@@ -26,6 +26,7 @@ pub const ResourceError = error{
 /// validated memcpy use case.
 /// Parameters:
 /// - `T`: type to identify.
+///
 /// Returns: id for `T` within this binary.
 pub fn typeId(comptime T: type) usize {
     return @truncate(std.hash.Wyhash.hash(0, @typeName(T)));
@@ -60,6 +61,7 @@ pub const TypeDesc = struct {
 /// are comptime-known), mirroring `computeLayout` in `mesh.zig`.
 /// Parameters:
 /// - `T`: type to describe.
+///
 /// Returns: runtime-usable description of `T`.
 pub fn describe(comptime T: type) TypeDesc {
     const ti = @typeInfo(T);
@@ -82,6 +84,7 @@ pub fn describe(comptime T: type) TypeDesc {
 /// Parameters:
 /// - fields: field descriptors to search.
 /// - name: field name to find.
+///
 /// Returns: field index, or null when absent.
 pub fn fieldIndexByName(fields: []const FieldDesc, name: []const u8) ?u32 {
     for (fields, 0..) |f, i| {
@@ -96,6 +99,7 @@ pub fn fieldIndexByName(fields: []const FieldDesc, name: []const u8) ?u32 {
 /// Parameters:
 /// - a: first field list.
 /// - b: second field list.
+///
 /// Returns: true when the lists describe the same shape.
 pub fn fieldsCompatible(a: []const FieldDesc, b: []const FieldDesc) bool {
     if (a.len != b.len) return false;
@@ -117,6 +121,7 @@ pub fn fieldsCompatible(a: []const FieldDesc, b: []const FieldDesc) bool {
 /// Parameters:
 /// - need: required field list (e.g. shader inputs).
 /// - have: provided field list (e.g. mesh vertex fields).
+///
 /// Returns: true when all required fields are present with matching types.
 pub fn fieldsSatisfiedBy(need: []const FieldDesc, have: []const FieldDesc) bool {
     for (need) |fn_need| {
@@ -165,6 +170,7 @@ pub const UniformKind = enum {
 /// Classifies a uniform field type.
 /// Parameters:
 /// - `T`: field type to classify.
+///
 /// Returns: upload kind, or `other` for resource/aggregate types.
 pub fn uniformKindOf(comptime T: type) UniformKind {
     if (T == f32) return .f32;
@@ -211,6 +217,7 @@ pub fn uniformKindOf(comptime T: type) UniformKind {
 /// Returns the exact byte size of a plain-data uniform kind.
 /// Parameters:
 /// - kind: uniform kind (must not be `other`).
+///
 /// Returns: byte size, or null for `other`.
 pub fn uniformKindSize(kind: UniformKind) ?usize {
     return switch (kind) {
@@ -247,6 +254,7 @@ pub const UniformFieldDesc = struct {
 /// `comptime` (all inputs are comptime-known).
 /// Parameters:
 /// - `U`: uniform struct type.
+///
 /// Returns: per-field descriptors in declaration order (`field_id` == index).
 pub fn uniformFields(comptime U: type) []const UniformFieldDesc {
     if (@typeInfo(U) != .@"struct") @compileError("uniformFields expects a struct, got " ++ @typeName(U));
@@ -268,6 +276,7 @@ pub fn uniformFields(comptime U: type) []const UniformFieldDesc {
 /// - fields: uniform field descriptors.
 /// - name: field name to find.
 /// - want_type_id: `typeId` of the expected field type.
+///
 /// Returns: field id, `FieldNotFound` or `FieldTypeMismatch`.
 pub fn uniformFieldIdByName(fields: []const UniformFieldDesc, name: []const u8, want_type_id: usize) ResourceError!u32 {
     for (fields, 0..) |f, i| {
@@ -285,6 +294,7 @@ pub fn uniformFieldIdByName(fields: []const UniformFieldDesc, name: []const u8, 
 /// - desc: field descriptor.
 /// - want_type_id: expected field type id for validation.
 /// - bytes: exactly `desc.size` bytes to write.
+///
 /// Returns: `FieldTypeMismatch` / `SizeMismatch` on validation failure.
 pub fn writeField(base: *anyopaque, desc: UniformFieldDesc, want_type_id: usize, bytes: []const u8) ResourceError!void {
     if (desc.type_id != want_type_id) return error.FieldTypeMismatch;
@@ -299,6 +309,7 @@ pub fn writeField(base: *anyopaque, desc: UniformFieldDesc, want_type_id: usize,
 /// - desc: field descriptor.
 /// - want_type_id: expected field type id for validation.
 /// - out: buffer receiving exactly `desc.size` bytes.
+///
 /// Returns: `FieldTypeMismatch` / `SizeMismatch` on validation failure.
 pub fn readField(base: *const anyopaque, desc: UniformFieldDesc, want_type_id: usize, out: []u8) ResourceError!void {
     if (desc.type_id != want_type_id) return error.FieldTypeMismatch;

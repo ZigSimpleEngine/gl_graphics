@@ -8,6 +8,7 @@ const gl = @import("gl");
 /// Parameters:
 /// - vert_: vertex shader descriptor type.
 /// - frag_: optional fragment shader descriptor type.
+///
 /// Returns: opaque shader program type.
 pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
     const has_frag = frag_ != null;
@@ -35,6 +36,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Returns mutable implementation pointer.
         /// Parameters:
         /// - self: program pointer.
+        ///
         /// Returns: mutable Impl pointer.
         inline fn impl(self: *Self) *Impl {
             return @ptrCast(@alignCast(self));
@@ -42,6 +44,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Returns immutable implementation pointer.
         /// Parameters:
         /// - self: const program pointer.
+        ///
         /// Returns: const Impl pointer.
         inline fn implConst(self: *const Self) *const Impl {
             return @ptrCast(@alignCast(self));
@@ -59,6 +62,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Creates and links a new shader program.
         /// Parameters:
         /// - allocator: allocator for Impl storage.
+        ///
         /// Returns: pointer to created program or error.
         pub fn create(allocator: std.mem.Allocator) !*Self {
             const m = try allocator.create(Impl);
@@ -98,6 +102,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Returns the singleton instance, creating it if needed.
         /// Parameters:
         /// - allocator: allocator for creation when not yet initialized.
+        ///
         /// Returns: pointer to program instance.
         pub fn instance(allocator: std.mem.Allocator) !*Self {
             if (_singleton) |s| if (s.implConst().initialized and s.implConst().id != 0) return s;
@@ -108,6 +113,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Parameters:
         /// - self: program to destroy.
         /// - allocator: allocator used for creation.
+        ///
         /// Returns: void.
         pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
             const m = self.impl();
@@ -122,6 +128,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Returns the OpenGL program identifier.
         /// Parameters:
         /// - self: const program pointer.
+        ///
         /// Returns: program id.
         pub fn getId(self: *const Self) u32 {
             return self.implConst().id;
@@ -129,6 +136,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Returns the cached vertex uniform locations.
         /// Parameters:
         /// - _: const program pointer unused, kept for API symmetry.
+        ///
         /// Returns: copy of vertex IdCache.
         pub fn getVertCache(_: *const Self) if (@hasDecl(Vert, "IdCache")) Vert.IdCache else void {
             return vert_cache;
@@ -136,6 +144,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Returns the cached fragment uniform locations.
         /// Parameters:
         /// - _: const program pointer unused.
+        ///
         /// Returns: copy of fragment IdCache or empty struct when no fragment stage.
         pub fn getFragCache(_: *const Self) if (has_frag) FragType.IdCache else void {
             if (has_frag) return frag_cache else return {};
@@ -144,6 +153,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Binds this program for rendering.
         /// Parameters:
         /// - self: const program pointer.
+        ///
         /// Returns: void.
         pub fn use(self: *const Self) void {
             gl.programs.use(self.implConst().id);
@@ -152,6 +162,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Returns a vertex uniform editor for this program.
         /// Parameters:
         /// - self: const program pointer.
+        ///
         /// Returns: vertex Editor bound to this program id.
         pub fn vertEdit(self: *const Self) Vert.Editor {
             return Vert.edit(self.implConst().id);
@@ -159,6 +170,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Returns a fragment uniform editor for this program.
         /// Parameters:
         /// - self: const program pointer.
+        ///
         /// Returns: fragment Editor or void when no fragment stage.
         pub fn fragEdit(self: *const Self) if (has_frag) FragType.Editor else void {
             if (has_frag) return FragType.edit(self.implConst().id) else return {};
@@ -166,6 +178,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Returns a vertex editor via singleton instance.
         /// Parameters:
         /// - allocator: allocator for singleton retrieval or creation.
+        ///
         /// Returns: vertex Editor or error.
         pub fn vertEditStatic(allocator: std.mem.Allocator) !Vert.Editor {
             const s = try instance(allocator);
@@ -174,6 +187,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Returns a fragment editor via singleton instance.
         /// Parameters:
         /// - allocator: allocator for singleton retrieval or creation.
+        ///
         /// Returns: fragment Editor or void or error.
         pub fn fragEditStatic(allocator: std.mem.Allocator) !if (has_frag) FragType.Editor else void {
             if (has_frag) {
@@ -184,6 +198,7 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Binds the singleton program for rendering.
         /// Parameters:
         /// - allocator: allocator for singleton retrieval or creation.
+        ///
         /// Returns: void or error.
         pub fn useStatic(allocator: std.mem.Allocator) !void {
             const s = try instance(allocator);

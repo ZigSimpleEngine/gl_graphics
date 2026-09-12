@@ -160,6 +160,13 @@ pub fn Mesh(comptime Vertex: type) type {
     const layout = comptime computeLayout(Vertex);
     const field_count = comptime fieldCount(Vertex);
     const field_slots = comptime computeFieldSlots(Vertex);
+    // Byte size of each top-level vertex field, used to validate raw SOA uploads.
+    const vertex_field_sizes = comptime blk: {
+        const fs = @typeInfo(Vertex).@"struct".fields;
+        var arr: [fs.len]usize = undefined;
+        for (fs, 0..) |f, i| arr[i] = @sizeOf(f.type);
+        break :blk arr;
+    };
     const Impl = struct {
         /// Vertex array object handle.
         vao: u32 = 0,
@@ -408,6 +415,9 @@ pub fn Mesh(comptime Vertex: type) type {
             _mesh: *Self,
             /// Pending vertex slice to upload (interleaved AOS layout).
             _pending_vertices: ?[]const Vertex = null,
+            /// Pending raw vertex bytes to upload (interleaved AOS layout).
+            /// Alternative to `_pending_vertices` for type-erased uploads.
+            _pending_vertices_bytes: ?struct { bytes: []const u8, count: usize } = null,
             /// True when pending vertices are supplied as split (SOA) per-field slices.
             _using_soa: bool = false,
             /// Pending per-field raw byte slices (only valid when `_using_soa`).
@@ -448,6 +458,24 @@ pub fn Mesh(comptime Vertex: type) type {
                 const mut = @constCast(self);
                 mut._using_soa = false;
                 mut._pending_vertices = vertices;
+                return mut;
+            }
+
+            /// Queues raw vertex bytes for upload (interleaved AOS layout).
+            /// Type-erased counterpart of `setVertices`: no `Vertex` type is
+            /// needed at the call site, only the byte size contract
+            /// `bytes.len == count * @sizeOf(Vertex)`.
+            /// Parameters:
+            /// - `self`: Editor instance.
+            /// - `bytes`: Raw interleaved vertex bytes to upload.
+            /// - `count`: Number of vertices encoded in `bytes`.
+            /// Returns: `*const Editor` for chaining.
+            pub fn setVerticesBytes(self: *const Editor, bytes: []const u8, count: usize) *const Editor {
+                const mut = @constCast(self);
+                if (bytes.len != count * @sizeOf(Vertex)) @panic("setVerticesBytes: byte size mismatch");
+                mut._using_soa = false;
+                mut._pending_vertices = null;
+                mut._pending_vertices_bytes = .{ .bytes = bytes, .count = count };
                 return mut;
             }
 
@@ -637,6 +665,64 @@ pub fn Mesh(comptime Vertex: type) type {
                 return self;
             }
 
+            /// Queues raw index bytes for upload with an explicit element type.
+            /// Type-erased counterpart of `setIndices`: the element type is
+            /// given as a GL enum instead of a Zig slice type.
+            /// Parameters:
+            /// - `self`: Editor instance.
+            /// - `bytes`: Raw index bytes to upload.
+            /// - `gl_type`: Element type (`.unsigned_byte`/`.unsigned_short`/`.unsigned_int`).
+            /// - `count`: Number of indices encoded in `bytes`.
+            /// Returns: `*const Editor` for chaining.
+            pub fn setIndicesBytes(self: *const Editor, bytes: []const u8, gl_type: gl.enums.DataType, count: usize) *const Editor {
+                const elem_size: usize = switch (gl_type) {
+                    .unsigned_byte => 1,
+                    .unsigned_short, .short => 2,
+                    .unsigned_int, .int => 4,
+                    else => @panic("setIndicesBytes: unsupported index type"),
+                };
+                if (bytes.len != count * elem_size) @panic("setIndicesBytes: byte size mismatch");
+                const mut = @constCast(self);
+                mut._pending_indices_bytes = bytes;
+                mut._pending_index_gl_type = gl_type;
+                mut._pending_index_count = count;
+                return mut;
+            }
+
+            /// Queues raw bytes for one SOA vertex field.
+            /// Type-erased building block for split-layout uploads: call once per
+            /// populated field, then `setSoaCount`, then `apply`. Bytes must hold
+            /// `count * @sizeOf(field)` tightly packed elements.
+            /// Parameters:
+            /// - `self`: Editor instance.
+            /// - `field_index`: Top-level vertex field index (declaration order).
+            /// - `bytes`: Raw field bytes to upload.
+            /// Returns: `*const Editor` for chaining.
+            pub fn setSoaField(self: *const Editor, field_index: u32, bytes: []const u8) *const Editor {
+                const mut = @constCast(self);
+                if (field_index >= field_count) @panic("setSoaField: field index out of bounds");
+                mut._using_soa = true;
+                mut._pending_vertices = null;
+                mut._pending_vertices_bytes = null;
+                mut._pending_soa_fields[field_index] = bytes;
+                return mut;
+            }
+
+            /// Sets the vertex count for a type-erased SOA upload.
+            /// Companion of `setSoaField`; sizes are validated in `apply`.
+            /// Parameters:
+            /// - `self`: Editor instance.
+            /// - `count`: Number of vertices in every populated SOA field.
+            /// Returns: `*const Editor` for chaining.
+            pub fn setSoaCount(self: *const Editor, count: usize) *const Editor {
+                const mut = @constCast(self);
+                mut._using_soa = true;
+                mut._pending_vertices = null;
+                mut._pending_vertices_bytes = null;
+                mut._pending_soa_count = count;
+                return mut;
+            }
+
             /// Overrides the vertex buffer handle.
             /// Parameters:
             /// - `self`: Editor instance.
@@ -725,12 +811,19 @@ pub fn Mesh(comptime Vertex: type) type {
                     m.vbo = vbo_id;
                     m.using_soa = false;
                     if (@constCast(self)._pending_vertices) |verts| m.vertex_count = verts.len;
+                    if (@constCast(self)._pending_vertices_bytes) |vb| m.vertex_count = vb.count;
                     configureAttributes();
                 } else if (@constCast(self)._pending_vertices) |verts| {
                     if (loaded) gl.buffers.bind(.array_buffer, m.vbo);
                     const bytes = std.mem.sliceAsBytes(verts);
                     if (loaded) gl.buffers.bufferData(.array_buffer, bytes.len, bytes.ptr, v_usage);
                     m.vertex_count = verts.len;
+                    m.using_soa = false;
+                    configureAttributes();
+                } else if (@constCast(self)._pending_vertices_bytes) |vb| {
+                    if (loaded) gl.buffers.bind(.array_buffer, m.vbo);
+                    if (loaded) gl.buffers.bufferData(.array_buffer, vb.bytes.len, vb.bytes.ptr, v_usage);
+                    m.vertex_count = vb.count;
                     m.using_soa = false;
                     configureAttributes();
                 }
@@ -759,7 +852,13 @@ pub fn Mesh(comptime Vertex: type) type {
                 const m = @constCast(self)._mesh.impl();
                 const loaded = gl.loader.loaded();
                 const v_usage = @constCast(self)._pending_vertex_usage orelse m.vertex_usage;
-                m.vertex_count = @constCast(self)._pending_soa_count;
+                const count = @constCast(self)._pending_soa_count;
+                inline for (0..field_count) |fi| {
+                    if (@constCast(self)._pending_soa_fields[fi]) |bytes| {
+                        if (bytes.len != count * vertex_field_sizes[fi]) @panic("SOA field byte size mismatch");
+                    }
+                }
+                m.vertex_count = count;
                 m.using_soa = true;
 
                 if (loaded) {

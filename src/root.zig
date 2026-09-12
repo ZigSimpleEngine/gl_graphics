@@ -18,9 +18,6 @@ pub const Map = @import("core").Map;
 /// Hierarchical transform, re-exported from `core`.
 pub const Transform = @import("core").Transform;
 
-/// Model — combination of material, mesh and transform.
-pub const Model = @import("model.zig").Model;
-
 /// Camera with projection and viewport.
 pub const Camera = @import("camera.zig").Camera;
 
@@ -29,6 +26,18 @@ pub const ShaderProgram = @import("shader_program.zig").ShaderProgram;
 
 /// Material — container for uniforms and program.
 pub const Material = @import("material.zig").Material;
+
+/// Compile-time type metadata for resource abstractions (no GL dependency).
+pub const gpu_meta = @import("gpu_meta.zig");
+
+/// Type-erased GPU resource records (AnyBuffer/AnyMesh/AnyProgram/AnyMaterial).
+pub const handles = @import("handles.zig");
+pub const AnyBuffer = handles.AnyBuffer;
+pub const AnyMesh = handles.AnyMesh;
+pub const AnyProgram = handles.AnyProgram;
+pub const AnyMaterial = handles.AnyMaterial;
+pub const meshAcceptsProgram = handles.meshAcceptsProgram;
+pub const materialAcceptsMesh = handles.materialAcceptsMesh;
 
 /// Common GLSL parsing utilities.
 pub const common = @import("descriptors/common.zig");

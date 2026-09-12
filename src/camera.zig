@@ -71,9 +71,6 @@ pub fn Camera(comptime scalar_type_: type) type {
 
             /// Top bound of orthographic projection.
             ortho_top: Scalar = 1,
-
-            /// Documentation for `on_use_callback: ?*const fn (*Self, *TransformT) void = null,`.
-            on_use_callback: ?*const fn (*Self, *TransformT) void = null,
         };
 
         /// Function `impl`.
@@ -152,12 +149,11 @@ pub fn Camera(comptime scalar_type_: type) type {
         ///
         /// Parameters:
         /// - `allocator` — parameter `allocator`.
-        /// - `on_use_callback` — parameter `on_use_callback`.
         ///
         /// Returns: `void)`.
-        pub fn create(allocator: std.mem.Allocator, on_use_callback: ?*const fn (*Self, *TransformT) void) !*Self {
+        pub fn create(allocator: std.mem.Allocator) !*Self {
             const m = try allocator.create(Impl);
-            m.* = .{ .on_use_callback = on_use_callback };
+            m.* = .{};
             recalcProjection(m);
             // view stays identity until use(transform) provides a transform
             return @ptrCast(m);
@@ -167,11 +163,10 @@ pub fn Camera(comptime scalar_type_: type) type {
         ///
         /// Parameters:
         /// - `allocator` — parameter `allocator`.
-        /// - `on_use_callback` — parameter `on_use_callback`.
         ///
         /// Returns: `void)`.
-        pub fn default(allocator: std.mem.Allocator, on_use_callback: ?*const fn (*Self, *TransformT) void) !*Self {
-            return create(allocator, on_use_callback);
+        pub fn default(allocator: std.mem.Allocator) !*Self {
+            return create(allocator);
         }
 
         /// Destroys the instance, freeing `Impl`.
@@ -285,16 +280,6 @@ pub fn Camera(comptime scalar_type_: type) type {
             return !self.implConst().is_perspective;
         }
 
-        /// Returns the `on_use` callback.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `?*const`.
-        pub fn getOnUseCallback(self: *const Self) ?*const fn (*Self, *TransformT) void {
-            return self.implConst().on_use_callback;
-        }
-
         /// Applies the viewport to the GL context.
         ///
         /// Parameters:
@@ -311,7 +296,6 @@ pub fn Camera(comptime scalar_type_: type) type {
         /// - `transform` — external transform to compute view matrix from. Must be already recalculated by caller if needed.
         pub fn use(self: *Self, transform: *TransformT) void {
             const m = self.impl();
-            if (m.on_use_callback) |cb| cb(self, transform);
             recalcView(m, transform);
             self.applyViewport();
         }
@@ -351,12 +335,6 @@ pub fn Camera(comptime scalar_type_: type) type {
 
             /// Pending orthographic bounds.
             _pending_ortho: ?struct { l: Scalar, r: Scalar, b: Scalar, t: Scalar } = null,
-
-            /// Documentation for `_pending_on_use_callback: ?*const fn (*Self, *TransformT) void = null,`.
-            _pending_on_use_callback: ?*const fn (*Self, *TransformT) void = null,
-
-            /// Flag indicating pending callback presence.
-            _has_pending_on_use_callback: bool = false,
 
             /// Alias for `create` for API uniformity.
             ///
@@ -470,19 +448,6 @@ pub fn Camera(comptime scalar_type_: type) type {
                 return @constCast(self);
             }
 
-            /// Sets the pending `on_use` callback.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `cb` — parameter `cb`.
-            ///
-            /// Returns: `void)`.
-            pub fn setOnUseCallback(self: *const Editor, cb: ?*const fn (*Self, *TransformT) void) *const Editor {
-                @constCast(self)._pending_on_use_callback = cb;
-                @constCast(self)._has_pending_on_use_callback = true;
-                return @constCast(self);
-            }
-
             /// Applies all pending changes.
             ///
             /// Parameters:
@@ -507,7 +472,6 @@ pub fn Camera(comptime scalar_type_: type) type {
                     cam.viewport_h = vp.h;
                     @constCast(self)._camera.applyViewport();
                 }
-                if (@constCast(self)._has_pending_on_use_callback) cam.on_use_callback = @constCast(self)._pending_on_use_callback;
                 recalcProjection(cam);
                 @constCast(self).* = Editor.init(@constCast(self)._camera);
             }

@@ -4,6 +4,8 @@ const std = @import("std");
 const gl = @import("gl");
 /// Texture wrapper type.
 const Texture = @import("texture.zig").Texture;
+/// Compile-time type metadata import.
+const gpu_meta = @import("gpu_meta.zig");
 
 /// Returns true when `T` is a math vector type (`math.Vec`).
 /// Parameters:
@@ -200,6 +202,113 @@ pub fn disposeShader(id: *u32, initialized: *bool) void {
         gl.shaders.delete(id.*);
         id.* = 0;
         initialized.* = false;
+    }
+}
+
+/// Uploads one plain-data uniform field from raw bytes, dispatching on kind.
+///
+/// Type-erased counterpart of `uploadUniformValue`: the value type is described
+/// by `kind` (from `gpu_meta`) instead of a comptime type. Resource kinds
+/// (samplers, uniform blocks, nested structs) are rejected with
+/// `UnsupportedUniformField` and require the typed path. Bytes are copied into
+/// aligned locals first, so the input slice may have any alignment.
+/// Parameters:
+/// - loc: uniform location (must be valid for the current program).
+/// - kind: upload classification of the field.
+/// - bytes: exactly `uniformKindSize(kind)` bytes in native field layout.
+/// Returns: `SizeMismatch` / `UnsupportedUniformField` on validation failure.
+pub fn uploadUniformByKind(loc: i32, kind: gpu_meta.UniformKind, bytes: []const u8) gpu_meta.ResourceError!void {
+    if (kind == .other) return error.UnsupportedUniformField;
+    const want = gpu_meta.uniformKindSize(kind) orelse return error.UnsupportedUniformField;
+    if (bytes.len != want) return error.SizeMismatch;
+    switch (kind) {
+        .f32, .vec1f => {
+            var v: f32 = undefined;
+            @memcpy(std.mem.asBytes(&v), bytes);
+            gl.uniforms.uniform1f(loc, v);
+        },
+        .vec2f => {
+            var d: [2]f32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniform2f(loc, d[0], d[1]);
+        },
+        .vec3f => {
+            var d: [3]f32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniform3f(loc, d[0], d[1], d[2]);
+        },
+        .vec4f => {
+            var d: [4]f32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniform4f(loc, d[0], d[1], d[2], d[3]);
+        },
+        .i32, .vec1i => {
+            var v: i32 = undefined;
+            @memcpy(std.mem.asBytes(&v), bytes);
+            gl.uniforms.uniform1i(loc, v);
+        },
+        .vec2i => {
+            var d: [2]i32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniform2i(loc, d[0], d[1]);
+        },
+        .vec3i => {
+            var d: [3]i32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniform3i(loc, d[0], d[1], d[2]);
+        },
+        .vec4i => {
+            var d: [4]i32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniform4i(loc, d[0], d[1], d[2], d[3]);
+        },
+        .u32, .vec1u => {
+            var v: u32 = undefined;
+            @memcpy(std.mem.asBytes(&v), bytes);
+            gl.uniforms.uniform1ui(loc, v);
+        },
+        .vec2u => {
+            var d: [2]u32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniform2ui(loc, d[0], d[1]);
+        },
+        .vec3u => {
+            var d: [3]u32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniform3ui(loc, d[0], d[1], d[2]);
+        },
+        .vec4u => {
+            var d: [4]u32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniform4ui(loc, d[0], d[1], d[2], d[3]);
+        },
+        .boolean => gl.uniforms.uniform1i(loc, if (bytes[0] != 0) 1 else 0),
+        .mat2 => {
+            var d: [4]f32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniformMatrix2fv(loc, false, &d);
+        },
+        .mat3 => {
+            var d: [9]f32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniformMatrix3fv(loc, false, &d);
+        },
+        .mat4 => {
+            var d: [16]f32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniformMatrix4fv(loc, false, &d);
+        },
+        .mat3x2 => {
+            var d: [6]f32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniformMatrix3x2fv(loc, false, &d);
+        },
+        .mat2x3 => {
+            var d: [6]f32 = undefined;
+            @memcpy(std.mem.asBytes(&d), bytes);
+            gl.uniforms.uniformMatrix2x3fv(loc, false, &d);
+        },
+        .other => return error.UnsupportedUniformField,
     }
 }
 

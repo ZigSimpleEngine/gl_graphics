@@ -54,13 +54,13 @@ pub const disposeShader = shader_runtime.disposeShader;
 
 /// Asset descriptors for generating Zig code from GLSL.
 pub const descriptors = struct {
-    /// Descriptor for `.glsl` files with structs.
+    /// EmbedDescriptor for `.glsl` files with structs.
     pub const GlslDescriptor = @import("descriptors/glsl.zig").GlslDescriptor;
 
-    /// Descriptor for vertex shaders `.vert`.
+    /// EmbedDescriptor for vertex shaders `.vert`.
     pub const VertexDescriptor = @import("descriptors/vert.zig").VertexDescriptor;
 
-    /// Descriptor for fragment shaders `.frag`.
+    /// EmbedDescriptor for fragment shaders `.frag`.
     pub const FragmentDescriptor = @import("descriptors/frag.zig").FragmentDescriptor;
 
     /// Alias for common utilities.
@@ -206,7 +206,7 @@ test "descriptor bake integration" {
     var frag_desc = descriptors.FragmentDescriptor{};
     var dir_desc = assets_manager_mod.descriptors.embed.EmbedDirectoryDescriptor{};
     var file_desc = assets_manager_mod.descriptors.embed.EmbedFileDescriptor{};
-    const descs = [_]*const assets_manager_mod.descriptors.embed.abstract.Descriptor{
+    const descs = [_]*const assets_manager_mod.descriptors.embed.abstract.EmbedDescriptor{
         &vert_desc.descriptor(), &frag_desc.descriptor(), &glsl_desc.descriptor(), &dir_desc.descriptor(), &file_desc.descriptor(),
     };
     _ = descs;

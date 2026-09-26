@@ -1,7 +1,7 @@
 /// Standard library import.
 const std = @import("std");
-/// Descriptor type from assets_manager.
-const Descriptor = @import("assets_manager").descriptors.embed.abstract.Descriptor;
+/// EmbedDescriptor type from assets_manager.
+const EmbedDescriptor = @import("assets_manager").descriptors.embed.abstract.EmbedDescriptor;
 /// Node type for asset tree traversal.
 const Node = @import("assets_manager").assets_tree.Node;
 /// Text utilities for code generation.
@@ -9,7 +9,7 @@ const text_utils = @import("assets_manager").text_utils;
 /// Common GLSL parsing utilities.
 const common = @import("common.zig");
 
-/// Descriptor that generates Zig code for fragment shader assets.
+/// EmbedDescriptor that generates Zig code for fragment shader assets.
 pub const FragmentDescriptor = struct {
     /// Number of spaces to indent per depth level.
     spaces_per_depth: usize = 4,
@@ -21,7 +21,7 @@ pub const FragmentDescriptor = struct {
     /// - data: descriptor data containing node to test.
     ///
     /// Returns: true when node is a .frag file.
-    pub fn isSuitableData(ptr: *anyopaque, init: std.process.Init, data: Descriptor.Data) anyerror!bool {
+    pub fn isSuitableData(ptr: *anyopaque, init: std.process.Init, data: EmbedDescriptor.Data) anyerror!bool {
         _ = ptr;
         _ = init;
         const node = data.node;
@@ -37,7 +37,7 @@ pub const FragmentDescriptor = struct {
     /// - data: descriptor data with node, depth and path info.
     ///
     /// Returns: allocated Zig source string.
-    pub fn getCode(ptr: *anyopaque, init: std.process.Init, data: Descriptor.Data) anyerror![]u8 {
+    pub fn getCode(ptr: *anyopaque, init: std.process.Init, data: EmbedDescriptor.Data) anyerror![]u8 {
         const self: *FragmentDescriptor = @ptrCast(@alignCast(ptr));
         const gpa = init.gpa;
         const io = init.io;
@@ -310,12 +310,12 @@ pub const FragmentDescriptor = struct {
         return std.fmt.allocPrint(gpa, "{s}pub const {s} = struct {{\n{s}{s}{s}}};\n", .{ prefix orelse "", var_name, inner_slice, if (inner_slice.len > 0 and inner_slice[inner_slice.len - 1] == '\n') "" else "\n", prefix orelse "" });
     }
 
-    /// Returns a Descriptor vtable for this fragment descriptor.
+    /// Returns an EmbedDescriptor vtable for this fragment descriptor.
     /// Parameters:
     /// - self: pointer to descriptor instance.
     ///
-    /// Returns: Descriptor with vtable.
-    pub fn descriptor(self: *FragmentDescriptor) Descriptor {
+    /// Returns: EmbedDescriptor with vtable.
+    pub fn descriptor(self: *FragmentDescriptor) EmbedDescriptor {
         return .{ .ptr = self, .vtable = .{ .get_code = getCode, .is_suitable_data = isSuitableData } };
     }
 };

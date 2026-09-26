@@ -1,7 +1,7 @@
 ﻿/// Standard library import.
 const std = @import("std");
 /// Descriptor type from assets_manager.
-const Descriptor = @import("assets_manager").descriptors.Descriptor;
+const Descriptor = @import("assets_manager").descriptors.embed.abstract.Descriptor;
 /// Node type for asset tree traversal.
 const Node = @import("assets_manager").assets_tree.Node;
 /// Text utilities for code generation.

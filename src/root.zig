@@ -204,9 +204,9 @@ test "descriptor bake integration" {
     var glsl_desc = descriptors.GlslDescriptor{};
     var vert_desc = descriptors.VertexDescriptor{};
     var frag_desc = descriptors.FragmentDescriptor{};
-    var dir_desc = assets_manager_mod.descriptors.ZigDirectoryDescriptor{};
-    var file_desc = assets_manager_mod.descriptors.ZigEmbedFileDescriptor{};
-    const descs = [_]*const assets_manager_mod.descriptors.Descriptor{
+    var dir_desc = assets_manager_mod.descriptors.embed.EmbedDirectoryDescriptor{};
+    var file_desc = assets_manager_mod.descriptors.embed.EmbedFileDescriptor{};
+    const descs = [_]*const assets_manager_mod.descriptors.embed.abstract.Descriptor{
         &vert_desc.descriptor(), &frag_desc.descriptor(), &glsl_desc.descriptor(), &dir_desc.descriptor(), &file_desc.descriptor(),
     };
     _ = descs;

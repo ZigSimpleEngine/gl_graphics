@@ -206,35 +206,51 @@ pub const VertexDescriptor = struct {
         }
         try inner.appendSlice(gpa, "\n");
 
-        if (uniforms.len == 0) {
-            try inner.appendSlice(gpa, "    pub const Uniform = struct {};\n");
-        } else {
-            try inner.appendSlice(gpa, "    pub const Uniform = struct {\n");
-            for (uniforms) |u| {
-                const zig_type_raw: []u8 = blk: {
-                    if (u.kind == .block) {
-                        const inner_t = try common.mapGLSLTypeToZig(gpa, u.glsl_type);
-                        defer gpa.free(inner_t);
-                        break :blk try std.fmt.allocPrint(gpa, "*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
-                    } else if (u.is_sampler) {
-                        break :blk try gpa.dupe(u8, "*const @import(\"gl_graphics\").Texture");
-                    } else {
-                        if (struct_map.contains(u.glsl_type)) {
-                            break :blk try gpa.dupe(u8, u.glsl_type);
-                        } else {
-                            break :blk try common.mapGLSLTypeToZig(gpa, u.glsl_type);
-                        }
-                    }
-                };
-                defer gpa.free(zig_type_raw);
-                try inner.appendSlice(gpa, "        ");
-                try inner.appendSlice(gpa, u.name);
-                try inner.appendSlice(gpa, ": ");
-                try inner.appendSlice(gpa, zig_type_raw);
-                try inner.appendSlice(gpa, ",\n");
-            }
-            try inner.appendSlice(gpa, "    };\n");
+        // Back-reference for `Material`: the Uniform struct is emitted as a
+        // sibling top-level decl so `Owner` can forward-reference the shader
+        // struct defined below (`Uniform.Owner.Uniform == Uniform`). A nested
+        // self-reference is rejected by the compiler, hence the sibling.
+        // `Owner` must not collide with a GLSL uniform name.
+        for (uniforms) |u| {
+            if (std.mem.eql(u8, u.name, "Owner")) return error.ReservedUniformName;
         }
+        var uniform_outer = std.ArrayList(u8).empty;
+        defer uniform_outer.deinit(gpa);
+        const uniform_type_name = try std.fmt.allocPrint(gpa, "{s}_Uniform", .{var_name});
+        defer gpa.free(uniform_type_name);
+        try uniform_outer.appendSlice(gpa, "const ");
+        try uniform_outer.appendSlice(gpa, uniform_type_name);
+        try uniform_outer.appendSlice(gpa, " = struct {\n");
+        const owner_line = try std.fmt.allocPrint(gpa, "    pub const Owner = {s};\n", .{var_name});
+        defer gpa.free(owner_line);
+        try uniform_outer.appendSlice(gpa, owner_line);
+        for (uniforms) |u| {
+            const zig_type_raw: []u8 = blk: {
+                if (u.kind == .block) {
+                    const inner_t = try common.mapGLSLTypeToZig(gpa, u.glsl_type);
+                    defer gpa.free(inner_t);
+                    break :blk try std.fmt.allocPrint(gpa, "*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
+                } else if (u.is_sampler) {
+                    break :blk try gpa.dupe(u8, "*const @import(\"gl_graphics\").Texture");
+                } else {
+                    if (struct_map.contains(u.glsl_type)) {
+                        break :blk try gpa.dupe(u8, u.glsl_type);
+                    } else {
+                        break :blk try common.mapGLSLTypeToZig(gpa, u.glsl_type);
+                    }
+                }
+            };
+            defer gpa.free(zig_type_raw);
+            try uniform_outer.appendSlice(gpa, "    ");
+            try uniform_outer.appendSlice(gpa, u.name);
+            try uniform_outer.appendSlice(gpa, ": ");
+            try uniform_outer.appendSlice(gpa, zig_type_raw);
+            try uniform_outer.appendSlice(gpa, ",\n");
+        }
+        try uniform_outer.appendSlice(gpa, "};\n");
+        try inner.appendSlice(gpa, "    pub const Uniform = ");
+        try inner.appendSlice(gpa, uniform_type_name);
+        try inner.appendSlice(gpa, ";\n");
         try inner.appendSlice(gpa, "\n");
 
         if (uniforms.len == 0) {
@@ -372,9 +388,12 @@ pub const VertexDescriptor = struct {
             }
         }
 
+        const uniform_outer_slice = try uniform_outer.toOwnedSlice(gpa);
+        defer gpa.free(uniform_outer_slice);
+
         const outer = try std.fmt.allocPrint(gpa,
-            "{s}pub const {s} = struct {{\n{s}{s}{s}}};\n",
-            .{ prefix orelse "", var_name, inner_slice, if (inner_slice.len > 0 and inner_slice[inner_slice.len - 1] == '\n') "" else "\n", prefix orelse "" });
+            "{s}{s}\n{s}pub const {s} = struct {{\n{s}{s}{s}}};\n",
+            .{ prefix orelse "", uniform_outer_slice, prefix orelse "", var_name, inner_slice, if (inner_slice.len > 0 and inner_slice[inner_slice.len - 1] == '\n') "" else "\n", prefix orelse "" });
         return outer;
     }
 

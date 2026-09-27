@@ -1,115 +1,101 @@
 ﻿/// Standard library import.
 const std = @import("std");
-/// OpenGL bindings import.
-const gl = @import("gl");
+/// Shader program factory import.
+const ShaderProgramFn = @import("shader_program.zig").ShaderProgram;
 /// Compile-time type metadata import.
 const gpu_meta = @import("gpu_meta.zig");
 
-/// Creates a material type bound to a specific shader program.
-/// The material stores vertex and fragment uniforms and applies them via editors.
-/// Parameters:
-/// - shader_program_: shader program type providing Vert and optional Frag descriptors.
+/// Validates that `U` is a shader-owned uniform struct and returns its owner.
 ///
-/// Returns: opaque material type specialized for the program.
-pub fn Material(comptime shader_program_: type) type {
-    const has_frag = shader_program_.HasFrag;
-    const FragUniform = if (has_frag) shader_program_.FragT.Uniform else struct {};
-    const VertUniform = shader_program_.Vert.Uniform;
+/// `U` must be the `Uniform` struct of a shader descriptor, i.e. it must
+/// declare `pub const Owner` pointing back at that descriptor, and
+/// `Owner.Uniform` must be exactly `U`. The owner must expose the minimal
+/// descriptor API consumed by `Material`/`ShaderProgram` (`Uniform`,
+/// `instance`, `edit`, `Editor` with `setUniform`/`apply`; `Vertex` is
+/// optional and only needed for mesh compatibility checks).
+/// Parameters:
+/// - U: uniform struct type to validate.
+/// - param_name: factory parameter name for error messages.
+///
+/// Returns: the owner shader descriptor type.
+fn checkShaderOwner(comptime U: type, comptime param_name: []const u8) type {
+    if (@typeInfo(U) != .@"struct") @compileError("Material: '" ++ param_name ++ "' must be a shader Uniform struct value (e.g. MyVert.Uniform{ ... }), got " ++ @typeName(U) ++ ". Pass a filled Uniform value; pass null only for 'frag_uniform'.");
+    if (!@hasDecl(U, "Owner")) @compileError("Material: '" ++ param_name ++ "' has type " ++ @typeName(U) ++ " without `pub const Owner`. Add `pub const Owner = <its shader>;` inside the Uniform struct (the generator emits it automatically; handwritten descriptors must add it by hand), so Material can find the ShaderProgram.");
+    const Owner = U.Owner;
+    if (@typeInfo(Owner) != .@"struct") @compileError("Material: '" ++ param_name ++ "' Owner must be the shader descriptor struct, got " ++ @typeName(Owner) ++ ".");
+    if (Owner.Uniform != U) @compileError("Material: '" ++ param_name ++ "' value of type " ++ @typeName(U) ++ " does not belong to its Owner " ++ @typeName(Owner) ++ " (Owner.Uniform differs). Pass a value of exactly Owner.Uniform.");
+    if (!@hasDecl(Owner, "instance") or @typeInfo(@TypeOf(Owner.instance)) != .@"fn") @compileError("Material: shader " ++ @typeName(Owner) ++ " must expose `pub fn instance() u32`.");
+    if (!@hasDecl(Owner, "edit") or @typeInfo(@TypeOf(Owner.edit)) != .@"fn") @compileError("Material: shader " ++ @typeName(Owner) ++ " must expose `pub fn edit(u32) Editor`.");
+    if (!@hasDecl(Owner, "Editor")) @compileError("Material: shader " ++ @typeName(Owner) ++ " must expose `pub const Editor`.");
+    if (!@hasDecl(Owner.Editor, "setUniform") or !@hasDecl(Owner.Editor, "apply")) @compileError("Material: shader " ++ @typeName(Owner) ++ ".Editor must expose `setUniform` and `apply`.");
+    return Owner;
+}
 
-    return opaque {
+/// Creates a material type from filled shader uniform values.
+///
+/// The material is a plain struct with mutable fields: create instances
+/// directly from the type (`var m: M = .{}`), no allocator, no create/destroy.
+/// Each call with different comptime data produces a unique material type
+/// (defaults differ); calls sharing the same shader descriptors reuse one
+/// comptime-singleton `ShaderProgram` under the hood.
+/// Parameters:
+/// - vert_uniform: filled vertex `Uniform` value of a shader descriptor.
+///   The value type must declare `pub const Owner` pointing at its shader
+///   (the `.vert` generator emits the Uniform as a sibling `X_Uniform`
+///   struct with the back-reference; handwritten shaders follow the same
+///   shape because a nested self-reference is rejected by the compiler):
+///   ```zig
+///   const MyVertUniform = struct {
+///       pub const Owner = MyVert;
+///       uMvp: Mat,
+///   };
+///   const MyVert = struct {
+///       pub const Uniform = MyVertUniform;
+///       // ...
+///   };
+///   ```
+///   The owner must expose `Uniform`, `instance`, `edit`, `Editor`
+///   with `setUniform`/`apply`. The value must be comptime-known plain
+///   data; resource bindings (`*const Texture`, uniform-block buffers)
+///   cannot be comptime defaults — pass `undefined` for them and assign
+///   on the instance before `use()`.
+/// - frag_uniform: filled fragment `Uniform` value with the same rules as
+///   above, or literal `null` for a vertex-only program.
+///
+/// Returns: material struct type with `vertUniform`/`fragUniform` defaulted
+/// to the passed values.
+///
+/// Example:
+/// ```zig
+/// const M = Material(.{ .uMvp = mvp, .uTex = undefined }, null);
+/// var m: M = .{};
+/// m.vertUniform.uTex = &tex;
+/// m.use();
+/// ```
+pub fn Material(comptime vert_uniform: anytype, comptime frag_uniform: anytype) type {
+    const VertUniform = @TypeOf(vert_uniform);
+    const Vert = checkShaderOwner(VertUniform, "vert_uniform");
+    const has_frag = @typeInfo(@TypeOf(frag_uniform)) != .null;
+    const FragUniform = if (has_frag) @TypeOf(frag_uniform) else struct {};
+    const Frag = if (has_frag) checkShaderOwner(FragUniform, "frag_uniform") else null;
+    const Prog = ShaderProgramFn(Vert, Frag);
+
+    return struct {
         /// Self alias for internal use.
         const Self = @This();
-        /// Shader program type this material is bound to.
-        pub const ShaderProgram = shader_program_;
+        /// Singleton shader program derived from the uniform owners.
+        pub const ShaderProgram = Prog;
+        /// True when a fragment stage is configured.
+        pub const HasFrag = has_frag;
         /// Vertex uniform type alias.
         pub const VertUniformT = VertUniform;
         /// Fragment uniform type alias.
         pub const FragUniformT = FragUniform;
 
-        /// Internal storage for material state.
-        const Impl = struct {
-            /// Cached vertex uniform values.
-            vertUniform: VertUniform = undefined,
-            /// Cached fragment uniform values.
-            fragUniform: FragUniform = undefined,
-            /// Associated shader program instance.
-            program: ?*ShaderProgram = null,
-            /// Allocator used for program instance retrieval.
-            allocator: std.mem.Allocator = undefined,
-        };
-
-        /// Returns mutable implementation pointer.
-        /// Parameters:
-        /// - self: material pointer.
-        ///
-        /// Returns: mutable Impl pointer.
-        inline fn impl(self: *Self) *Impl {
-            return @ptrCast(@alignCast(self));
-        }
-        /// Returns immutable implementation pointer.
-        /// Parameters:
-        /// - self: const material pointer.
-        ///
-        /// Returns: const Impl pointer.
-        inline fn implConst(self: *const Self) *const Impl {
-            return @ptrCast(@alignCast(self));
-        }
-
-        /// Creates a new material instance.
-        /// Parameters:
-        /// - allocator: allocator for storage and program instance.
-        ///
-        /// Returns: pointer to created material or error.
-        pub fn create(allocator: std.mem.Allocator) !*Self {
-            const m = try allocator.create(Impl);
-            const prog = try ShaderProgram.instance(allocator);
-            m.* = .{ .program = prog, .allocator = allocator };
-            return @ptrCast(m);
-        }
-        /// Destroys the material and frees its storage.
-        /// Parameters:
-        /// - self: material to destroy.
-        /// - allocator: allocator used for creation.
-        ///
-        /// Returns: void.
-        pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
-            allocator.destroy(self.impl());
-        }
-
-        /// Returns a copy of the cached vertex uniform.
-        /// Parameters:
-        /// - self: const material pointer.
-        ///
-        /// Returns: vertex uniform value.
-        pub fn getVertUniform(self: *const Self) VertUniform {
-            return self.implConst().vertUniform;
-        }
-        /// Returns a copy of the cached fragment uniform.
-        /// Parameters:
-        /// - self: const material pointer.
-        ///
-        /// Returns: fragment uniform value.
-        pub fn getFragUniform(self: *const Self) FragUniform {
-            return self.implConst().fragUniform;
-        }
-        /// Sets the cached vertex uniform.
-        /// Parameters:
-        /// - self: material pointer.
-        /// - u: new vertex uniform value.
-        ///
-        /// Returns: void.
-        pub fn setVertUniform(self: *Self, u: VertUniform) void {
-            self.impl().vertUniform = u;
-        }
-        /// Sets the cached fragment uniform.
-        /// Parameters:
-        /// - self: material pointer.
-        /// - u: new fragment uniform value.
-        ///
-        /// Returns: void.
-        pub fn setFragUniform(self: *Self, u: FragUniform) void {
-            self.impl().fragUniform = u;
-        }
+        /// Cached vertex uniform values (defaults from the factory call).
+        vertUniform: VertUniform = vert_uniform,
+        /// Cached fragment uniform values (defaults from the factory call).
+        fragUniform: FragUniform = if (has_frag) frag_uniform else .{},
 
         /// Errors for name/id based uniform field access.
         pub const UniformFieldError = gpu_meta.ResourceError;
@@ -135,7 +121,7 @@ pub fn Material(comptime shader_program_: type) type {
         pub fn setVertUniformData(self: *Self, field_id: u32, data: anytype) UniformFieldError!void {
             const fields = comptime gpu_meta.uniformFields(VertUniform);
             if (field_id >= fields.len) return error.UnknownFieldId;
-            try gpu_meta.writeField(&self.impl().vertUniform, fields[field_id], gpu_meta.typeId(@TypeOf(data)), std.mem.asBytes(&data));
+            try gpu_meta.writeField(&self.vertUniform, fields[field_id], gpu_meta.typeId(@TypeOf(data)), std.mem.asBytes(&data));
         }
 
         /// Reads one vertex uniform field by id.
@@ -150,7 +136,7 @@ pub fn Material(comptime shader_program_: type) type {
             if (field_id >= fields.len) return error.UnknownFieldId;
             if (fields[field_id].type_id != gpu_meta.typeId(T)) return error.FieldTypeMismatch;
             var out: T = undefined;
-            try gpu_meta.readField(&self.implConst().vertUniform, fields[field_id], gpu_meta.typeId(T), std.mem.asBytes(&out));
+            try gpu_meta.readField(&self.vertUniform, fields[field_id], gpu_meta.typeId(T), std.mem.asBytes(&out));
             return out;
         }
 
@@ -175,7 +161,7 @@ pub fn Material(comptime shader_program_: type) type {
         pub fn setFragUniformData(self: *Self, field_id: u32, data: anytype) UniformFieldError!void {
             const fields = comptime gpu_meta.uniformFields(FragUniform);
             if (field_id >= fields.len) return error.UnknownFieldId;
-            try gpu_meta.writeField(&self.impl().fragUniform, fields[field_id], gpu_meta.typeId(@TypeOf(data)), std.mem.asBytes(&data));
+            try gpu_meta.writeField(&self.fragUniform, fields[field_id], gpu_meta.typeId(@TypeOf(data)), std.mem.asBytes(&data));
         }
 
         /// Reads one fragment uniform field by id.
@@ -190,73 +176,107 @@ pub fn Material(comptime shader_program_: type) type {
             if (field_id >= fields.len) return error.UnknownFieldId;
             if (fields[field_id].type_id != gpu_meta.typeId(T)) return error.FieldTypeMismatch;
             var out: T = undefined;
-            try gpu_meta.readField(&self.implConst().fragUniform, fields[field_id], gpu_meta.typeId(T), std.mem.asBytes(&out));
+            try gpu_meta.readField(&self.fragUniform, fields[field_id], gpu_meta.typeId(T), std.mem.asBytes(&out));
             return out;
-        }
-
-        /// Returns the associated shader program if present.
-        /// Parameters:
-        /// - self: const material pointer.
-        ///
-        /// Returns: optional program pointer.
-        pub fn getProgram(self: *const Self) ?*ShaderProgram {
-            return self.implConst().program;
         }
 
         /// Binds the program and uploads uniforms via editors.
         /// Dynamic per-frame uniform updates are the caller's job: write the
-        /// cached uniforms (setVertUniform / setFragUniform / field setters)
+        /// `vertUniform` / `fragUniform` fields (or field setters)
         /// before calling `use`, e.g. from an explicit ECS system.
         /// Parameters:
         /// - self: material pointer.
         ///
         /// Returns: void.
         pub fn use(self: *Self) void {
-            const m = self.impl();
-            if (m.program == null or m.program.?.getId() == 0)
-                m.program = ShaderProgram.instance(m.allocator) catch null;
-            const prog = m.program orelse return;
-            prog.use();
-            var ve = prog.vertEdit();
-            _ = ve.setUniform(m.vertUniform);
+            Prog.use();
+            var ve = Prog.vertEdit();
+            _ = ve.setUniform(self.vertUniform);
             ve.apply();
             if (has_frag) {
-                var fe = prog.fragEdit();
-                _ = fe.setUniform(m.fragUniform);
+                var fe = Prog.fragEdit();
+                _ = fe.setUniform(self.fragUniform);
                 fe.apply();
             }
         }
     };
 }
 
-test "material uniform field access by name and id" {
-    const DummyVert = struct {
-        pub const Uniform = struct { uA: f32, uB: i32 };
+// File-scope doubles: `Owner` forward-references require container scope
+// (function-local forward refs are rejected), mirroring generated shaders.
+const DummyVertUniform = struct {
+    pub const Owner = DummyVert;
+    uA: f32,
+    uB: i32,
+};
+const DummyVert = struct {
+    pub const Uniform = DummyVertUniform;
+    pub const Editor = struct {
+        pub fn setUniform(self: *@This(), u: Uniform) *@This() {
+            _ = u;
+            return self;
+        }
+        pub fn apply(self: *@This()) void {
+            _ = self;
+        }
     };
-    const DummyFrag = struct {
-        pub const Uniform = struct { uC: u32 };
+    pub fn instance() u32 {
+        return 0;
+    }
+    pub fn edit(_: u32) Editor {
+        return .{};
+    }
+};
+const DummyFragUniform = struct {
+    pub const Owner = DummyFrag;
+    uC: u32,
+};
+const DummyFrag = struct {
+    pub const Uniform = DummyFragUniform;
+    pub const Editor = struct {
+        pub fn setUniform(self: *@This(), u: Uniform) *@This() {
+            _ = u;
+            return self;
+        }
+        pub fn apply(self: *@This()) void {
+            _ = self;
+        }
     };
-    const DummyProg = struct {
-        pub const HasFrag = true;
-        pub const Vert = DummyVert;
-        pub const FragT = DummyFrag;
-    };
-    const M = Material(DummyProg);
-    const alloc = std.testing.allocator;
-    const storage = try alloc.create(M.Impl);
-    defer alloc.destroy(storage);
-    storage.* = .{
-        .vertUniform = .{ .uA = 1.0, .uB = 2 },
-        .fragUniform = .{ .uC = 3 },
-        .program = null,
-        .allocator = alloc,
-    };
-    const self: *M = @ptrCast(storage);
+    pub fn instance() u32 {
+        return 0;
+    }
+    pub fn edit(_: u32) Editor {
+        return .{};
+    }
+};
+
+test "material from uniform values, defaults and uniqueness" {
+    const M = Material(DummyVert.Uniform{ .uA = 1.0, .uB = 2 }, DummyFrag.Uniform{ .uC = 3 });
+    var self: M = .{};
+    // Factory values become instance defaults.
+    try std.testing.expectEqual(@as(f32, 1.0), self.vertUniform.uA);
+    try std.testing.expectEqual(@as(u32, 3), self.fragUniform.uC);
+    // Instances are mutable directly.
+    self.vertUniform.uA = 5.0;
+    try std.testing.expectEqual(@as(f32, 5.0), self.vertUniform.uA);
+
+    // Same shaders, different data -> unique material, shared program.
+    const M2 = Material(DummyVert.Uniform{ .uA = 9.0, .uB = 2 }, DummyFrag.Uniform{ .uC = 3 });
+    try std.testing.expect(M != M2);
+    try std.testing.expect(M.ShaderProgram == M2.ShaderProgram);
+    const other: M2 = .{};
+    try std.testing.expectEqual(@as(f32, 9.0), other.vertUniform.uA);
+
+    // Vertex-only material via null.
+    const MV = Material(DummyVert.Uniform{ .uA = 0.5, .uB = -1 }, null);
+    try std.testing.expect(!MV.HasFrag);
+    const vonly: MV = .{};
+    try std.testing.expectEqual(@as(f32, 0.5), vonly.vertUniform.uA);
 
     const id_a = try M.getVertUniformFieldId("uA", f32);
-    try std.testing.expectEqual(@as(f32, 1.0), try self.getVertUniformData(id_a, f32));
+    try std.testing.expectEqual(@as(f32, 5.0), try self.getVertUniformData(id_a, f32));
     try self.setVertUniformData(id_a, @as(f32, 2.5));
-    try std.testing.expectEqual(@as(f32, 2.5), self.getVertUniform().uA);
+    try std.testing.expectEqual(@as(f32, 2.5), self.vertUniform.uA);
 
     const id_b = try M.getVertUniformFieldId("uB", i32);
     try self.setVertUniformData(id_b, @as(i32, -4));

@@ -79,69 +79,82 @@ pub const assets_manager = @import("assets_manager");
 /// Re-export `core` (Transform, Map).
 pub const core = @import("core");
 
+// File-scope doubles: `Owner` forward-references require container scope,
+// mirroring generated shaders.
+const DummyVertUniform = struct {
+    pub const Owner = DummyVert;
+    uMvp: math.Mat(4, 4, f32),
+};
+const DummyVert = struct {
+    pub const Vertex = struct { pos: math.Vec(3, f32) };
+    pub const Uniform = DummyVertUniform;
+    pub const IdCache = struct { uMvp: i32 };
+    pub var id: u32 = 0;
+    pub fn instance() u32 {
+        return 1;
+    }
+    pub fn dispose() void {}
+    pub const Editor = struct {
+        _program: u32,
+        pub fn init(p: u32) @This() {
+            return .{ ._program = p };
+        }
+        pub fn setUniform(self: *@This(), u: Uniform) *@This() {
+            _ = u;
+            return self;
+        }
+        pub fn set_uMvp(self: *@This(), v: math.Mat(4, 4, f32)) *@This() {
+            _ = v;
+            return self;
+        }
+        pub fn apply(self: *@This()) void {
+            _ = self;
+        }
+    };
+    pub fn edit(p: u32) Editor {
+        return Editor.init(p);
+    }
+};
+const DummyFragUniform = struct {
+    pub const Owner = DummyFrag;
+    uColor: math.Vec(4, f32),
+};
+const DummyFrag = struct {
+    pub const Uniform = DummyFragUniform;
+    pub const IdCache = struct { uColor: i32 };
+    pub var id: u32 = 0;
+    pub fn instance() u32 {
+        return 2;
+    }
+    pub fn dispose() void {}
+    pub const Editor = struct {
+        _program: u32,
+        pub fn init(p: u32) @This() {
+            return .{ ._program = p };
+        }
+        pub fn setUniform(self: *@This(), u: Uniform) *@This() {
+            _ = u;
+            return self;
+        }
+        pub fn apply(self: *@This()) void {
+            _ = self;
+        }
+    };
+    pub fn edit(p: u32) Editor {
+        return Editor.init(p);
+    }
+};
+
 test "smoke — texture opaque + editor chain" {
     _ = Texture;
     _ = Buffer(u16);
     _ = Mesh(struct { pos: math.Vec(3, f32), uv: math.Vec(2, f32) });
     _ = Transform(f32);
     _ = Map(.my_map, struct { a: i32 });
-    const DummyVert = struct {
-        pub const Vertex = struct { pos: math.Vec(3, f32) };
-        pub const Uniform = struct { uMvp: math.Mat(4, 4, f32) };
-        pub const IdCache = struct { uMvp: i32 };
-        pub var id: u32 = 0;
-        pub fn instance() u32 {
-            return 1;
-        }
-        pub fn dispose() void {}
-        pub const Editor = struct {
-            _program: u32,
-            pub fn init(p: u32) @This() {
-                return .{ ._program = p };
-            }
-            pub fn setUniform(self: *@This(), u: Uniform) *@This() {
-                _ = u;
-                return self;
-            }
-            pub fn set_uMvp(self: *@This(), v: math.Mat(4, 4, f32)) *@This() {
-                _ = v;
-                return self;
-            }
-            pub fn apply(self: *@This()) void {
-                _ = self;
-            }
-        };
-        pub fn edit(p: u32) Editor {
-            return Editor.init(p);
-        }
-    };
-    const DummyFrag = struct {
-        pub const Uniform = struct { uColor: math.Vec(4, f32) };
-        pub const IdCache = struct { uColor: i32 };
-        pub var id: u32 = 0;
-        pub fn instance() u32 {
-            return 2;
-        }
-        pub fn dispose() void {}
-        pub const Editor = struct {
-            _program: u32,
-            pub fn init(p: u32) @This() {
-                return .{ ._program = p };
-            }
-            pub fn setUniform(self: *@This(), u: Uniform) *@This() {
-                _ = u;
-                return self;
-            }
-            pub fn apply(self: *@This()) void {
-                _ = self;
-            }
-        };
-        pub fn edit(p: u32) Editor {
-            return Editor.init(p);
-        }
-    };
     _ = ShaderProgram(DummyVert, DummyFrag);
-    _ = Material(ShaderProgram(DummyVert, DummyFrag));
+    const DummyMat = Material(DummyVert.Uniform{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, DummyFrag.Uniform{ .uColor = math.Vec(4, f32).zero() });
+    const dummy_mat: DummyMat = .{};
+    _ = dummy_mat;
     _ = Framebuffer;
     _ = Camera(f32);
 }

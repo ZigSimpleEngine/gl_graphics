@@ -14,8 +14,6 @@ const mesh_mod = @import("mesh.zig");
 const Mesh = mesh_mod.Mesh;
 /// Vertex attribute info import.
 const AttribInfo = mesh_mod.AttribInfo;
-/// Typed shader program import.
-const ShaderProgram = @import("shader_program.zig").ShaderProgram;
 /// Typed material import.
 const Material = @import("material.zig").Material;
 
@@ -741,24 +739,26 @@ pub const UniformStage = enum {
 
 /// Type-erased wrapper over `ShaderProgram(Vert, Frag)`.
 ///
-/// Keeps descriptor names, both `Uniform` descriptions and the vertex shader
-/// input list (`Vert.Vertex` fields when the descriptor provides them), so a
-/// program can be matched against meshes without knowing the descriptors.
+/// Keeps the singleton program id plus descriptor names, both `Uniform`
+/// descriptions and the vertex shader input list (`Vert.Vertex` fields when
+/// the descriptor provides them), so a program can be matched against meshes
+/// without knowing the descriptors. The wrapped program stays a comptime
+/// singleton: thunks captured at `wrap` time call its static methods.
 pub const AnyProgram = struct {
-    /// Wrapped `*ShaderProgram(Vert, Frag)`, owned by the pool reference holder.
-    ptr: *anyopaque,
-    /// Destroys the wrapped program and frees its storage.
-    destroy_fn: *const fn (*anyopaque, std.mem.Allocator) void,
-    /// Binds the program for rendering.
-    use_fn: *const fn (*const anyopaque) void,
+    /// Singleton program id snapshotted at wrap time.
+    program_id: u32,
+    /// Destroys the wrapped singleton program (resets its static state).
+    destroy_fn: *const fn () void,
+    /// Binds the singleton program for rendering.
+    use_fn: *const fn () void,
     /// Returns the live GL program id.
-    get_id_fn: *const fn (*const anyopaque) u32,
+    get_id_fn: *const fn () u32,
     /// Live uniform location query by stage + field id.
-    uniform_location_fn: *const fn (*const anyopaque, UniformStage, u32) gpu_meta.ResourceError!i32,
+    uniform_location_fn: *const fn (UniformStage, u32) gpu_meta.ResourceError!i32,
     /// Direct plain-data field upload into the bound program (vertex stage).
-    upload_vert_fn: *const fn (*const anyopaque, u32, usize, []const u8) gpu_meta.ResourceError!void,
+    upload_vert_fn: *const fn (u32, usize, []const u8) gpu_meta.ResourceError!void,
     /// Direct plain-data field upload (fragment stage). Null when no fragment stage.
-    upload_frag_fn: ?*const fn (*const anyopaque, u32, usize, []const u8) gpu_meta.ResourceError!void,
+    upload_frag_fn: ?*const fn (u32, usize, []const u8) gpu_meta.ResourceError!void,
     /// `@typeName` of the vertex descriptor.
     vert_name: []const u8,
     /// `@typeName` of the fragment descriptor, if any.
@@ -775,38 +775,32 @@ pub const AnyProgram = struct {
     vert_fields: []const gpu_meta.UniformFieldDesc,
     /// Fragment uniform field descriptors (`field_id` == index).
     frag_fields: []const gpu_meta.UniformFieldDesc,
-    /// GL program id cached at wrap time.
-    gl_id: u32,
 
-    /// Wraps a typed program pointer. The record does not take ownership.
+    /// Wraps a shader program type. The record does not take ownership:
+    /// the program stays a comptime singleton owned by its own static state.
     /// Parameters:
-    /// - ptr: `*ShaderProgram(Vert, Frag)` for any descriptors.
+    /// - Prog: `ShaderProgram(Vert, Frag)` type for any descriptors.
     ///
     /// Returns: type-erased record.
-    pub fn wrap(ptr: anytype) AnyProgram {
-        const P = std.meta.Child(@TypeOf(ptr));
-        if (!@hasDecl(P, "HasFrag") or !@hasDecl(P, "Vert") or !@hasDecl(P, "FragT")) @compileError("AnyProgram.wrap expects *ShaderProgram(Vert, Frag), got " ++ @typeName(@TypeOf(ptr)));
-        const Vert = P.Vert;
-        const has_frag = P.HasFrag;
-        const FragU = if (has_frag) P.FragT.Uniform else struct {};
+    pub fn wrap(comptime Prog: type) AnyProgram {
+        if (!@hasDecl(Prog, "HasFrag") or !@hasDecl(Prog, "Vert") or !@hasDecl(Prog, "FragT")) @compileError("AnyProgram.wrap expects a ShaderProgram(Vert, Frag) type, got " ++ @typeName(Prog));
+        const Vert = Prog.Vert;
+        const has_frag = Prog.HasFrag;
+        const FragU = if (has_frag) Prog.FragT.Uniform else struct {};
         const VertU = Vert.Uniform;
         const vert_fields = comptime gpu_meta.uniformFields(VertU);
         const frag_fields = comptime if (has_frag) gpu_meta.uniformFields(FragU) else @as([]const gpu_meta.UniformFieldDesc, &.{});
         const S = struct {
-            fn destroy(p: *anyopaque, alloc: std.mem.Allocator) void {
-                const s: @TypeOf(ptr) = @ptrCast(@alignCast(p));
-                s.destroy(alloc);
+            fn destroy() void {
+                Prog.destroy();
             }
-            fn use(p: *const anyopaque) void {
-                const s: @TypeOf(ptr) = @ptrCast(@alignCast(@constCast(p)));
-                s.use();
+            fn use() void {
+                Prog.use();
             }
-            fn getId(p: *const anyopaque) u32 {
-                const s: @TypeOf(ptr) = @ptrCast(@alignCast(@constCast(p)));
-                return s.getId();
+            fn getId() u32 {
+                return Prog.getId();
             }
-            fn locateUniform(p: *const anyopaque, stage: UniformStage, field_id: u32) gpu_meta.ResourceError!i32 {
-                const s: @TypeOf(ptr) = @ptrCast(@alignCast(@constCast(p)));
+            fn locateUniform(stage: UniformStage, field_id: u32) gpu_meta.ResourceError!i32 {
                 const fields = switch (stage) {
                     .vert => vert_fields,
                     .frag => if (has_frag) frag_fields else return error.UnknownFieldId,
@@ -819,24 +813,24 @@ pub const AnyProgram = struct {
                 if (uname.len >= buf.len) return error.UnknownFieldId;
                 @memcpy(buf[0..uname.len], uname);
                 buf[uname.len] = 0;
-                return gl.uniforms.location(s.getId(), buf[0..uname.len :0]);
+                return gl.uniforms.location(Prog.getId(), buf[0..uname.len :0]);
             }
-            fn uploadVert(p: *const anyopaque, field_id: u32, want_type: usize, bytes: []const u8) gpu_meta.ResourceError!void {
+            fn uploadVert(field_id: u32, want_type: usize, bytes: []const u8) gpu_meta.ResourceError!void {
                 if (field_id >= vert_fields.len) return error.UnknownFieldId;
                 const desc = vert_fields[field_id];
                 if (desc.type_id != want_type) return error.FieldTypeMismatch;
                 if (desc.kind == .other) return error.UnsupportedUniformField;
-                const loc = try locateUniform(p, .vert, field_id);
+                const loc = try locateUniform(.vert, field_id);
                 if (loc == -1) return;
                 try shader_runtime.uploadUniformByKind(loc, desc.kind, bytes);
             }
-            fn uploadFrag(p: *const anyopaque, field_id: u32, want_type: usize, bytes: []const u8) gpu_meta.ResourceError!void {
+            fn uploadFrag(field_id: u32, want_type: usize, bytes: []const u8) gpu_meta.ResourceError!void {
                 if (!has_frag) return error.UnknownFieldId;
                 if (field_id >= frag_fields.len) return error.UnknownFieldId;
                 const desc = frag_fields[field_id];
                 if (desc.type_id != want_type) return error.FieldTypeMismatch;
                 if (desc.kind == .other) return error.UnsupportedUniformField;
-                const loc = try locateUniform(p, .frag, field_id);
+                const loc = try locateUniform(.frag, field_id);
                 if (loc == -1) return;
                 try shader_runtime.uploadUniformByKind(loc, desc.kind, bytes);
             }
@@ -848,7 +842,7 @@ pub const AnyProgram = struct {
             break :blk gpu_meta.describe(VX).fields;
         };
         return .{
-            .ptr = ptr,
+            .program_id = Prog.instance(),
             .destroy_fn = S.destroy,
             .use_fn = S.use,
             .get_id_fn = S.getId,
@@ -856,50 +850,49 @@ pub const AnyProgram = struct {
             .upload_vert_fn = S.uploadVert,
             .upload_frag_fn = if (has_frag) S.uploadFrag else null,
             .vert_name = @typeName(Vert),
-            .frag_name = if (P.Frag) |FT| @typeName(FT) else null,
+            .frag_name = if (Prog.Frag) |FT| @typeName(FT) else null,
             .has_frag = has_frag,
             .vert_uniform = comptime gpu_meta.describe(VertU),
             .frag_uniform = comptime gpu_meta.describe(FragU),
             .vertex_inputs = inputs,
             .vert_fields = vert_fields,
             .frag_fields = frag_fields,
-            .gl_id = ptr.getId(),
         };
     }
 
-    /// Downcasts back to a typed program. Returns null on descriptor mismatch.
+    /// Checks whether the record matches the given descriptor pair.
     /// Parameters:
-    /// - self: record to downcast.
+    /// - self: record to check.
     /// - V: expected vertex descriptor type.
     /// - F: expected fragment descriptor type (`null` for vertex-only programs).
     ///
-    /// Returns: `*ShaderProgram(V, F)` or null.
-    pub fn cast(self: *AnyProgram, comptime V: type, comptime F: ?type) ?*ShaderProgram(V, F) {
-        if (!std.mem.eql(u8, self.vert_name, @typeName(V))) return null;
+    /// Returns: true on descriptor match.
+    pub fn matches(self: *const AnyProgram, comptime V: type, comptime F: ?type) bool {
+        if (!std.mem.eql(u8, self.vert_name, @typeName(V))) return false;
         if (F) |FT| {
-            if (!self.has_frag) return null;
-            const fname = self.frag_name orelse return null;
-            if (!std.mem.eql(u8, fname, @typeName(FT))) return null;
-        } else if (self.has_frag) return null;
-        return @ptrCast(@alignCast(self.ptr));
+            if (!self.has_frag) return false;
+            const fname = self.frag_name orelse return false;
+            if (!std.mem.eql(u8, fname, @typeName(FT))) return false;
+        } else if (self.has_frag) return false;
+        return true;
     }
 
-    /// Destroys the wrapped program (the abstracted resource).
-    pub fn destroy(self: *const AnyProgram, alloc: std.mem.Allocator) void {
-        self.destroy_fn(self.ptr, alloc);
+    /// Destroys the wrapped singleton program (resets its static state).
+    pub fn destroy(self: *const AnyProgram) void {
+        self.destroy_fn();
     }
     /// Binds the program for rendering. See `ShaderProgram.use`.
     pub fn use(self: *const AnyProgram) void {
-        self.use_fn(self.ptr);
+        self.use_fn();
     }
     /// Returns the live GL program id.
     pub fn getId(self: *const AnyProgram) u32 {
-        return self.get_id_fn(self.ptr);
+        return self.get_id_fn();
     }
     /// Queries a live uniform location by stage + field id.
     /// The program must be linked; the caller should cache the result.
     pub fn uniformLocation(self: *const AnyProgram, stage: UniformStage, field_id: u32) gpu_meta.ResourceError!i32 {
-        return self.uniform_location_fn(self.ptr, stage, field_id);
+        return self.uniform_location_fn(stage, field_id);
     }
     /// Resolves a vertex uniform field id by name with a type check.
     pub fn getVertUniformFieldId(self: *const AnyProgram, name: []const u8, want_type_id: usize) gpu_meta.ResourceError!u32 {
@@ -960,10 +953,10 @@ pub const AnyProgram = struct {
                 if (!self.rec.has_frag) return error.UnknownFieldId;
                 try validateUniformItem(self.frag_fields, it, true);
             }
-            self.rec.use_fn(self.rec.ptr);
-            for (self._pending_vert) |it| try self.rec.upload_vert_fn(self.rec.ptr, it.field_id, it.type_id, it.bytes);
+            self.rec.use_fn();
+            for (self._pending_vert) |it| try self.rec.upload_vert_fn(it.field_id, it.type_id, it.bytes);
             if (self.rec.upload_frag_fn) |f| {
-                for (self._pending_frag) |it| try f(self.rec.ptr, it.field_id, it.type_id, it.bytes);
+                for (self._pending_frag) |it| try f(it.field_id, it.type_id, it.bytes);
             } else if (self._pending_frag.len > 0) return error.UnknownFieldId;
         }
     };
@@ -978,16 +971,18 @@ pub const AnyProgram = struct {
     }
 };
 
-/// Type-erased wrapper over `Material(Program)`.
+/// Type-erased view over a `Material` plain struct.
+///
+/// The record never owns the material: the instance lives with the caller
+/// (stack, ECS storage, arena) and is only borrowed through `ptr`. There is
+/// deliberately no destroy/create: materials are ordinary structs.
 ///
 /// Field writes go through the CPU-side uniform cache (any field kind,
 /// including samplers: validated by type id + size, uploaded on `use`),
 /// so the record exposes the complete uniform functionality.
 pub const AnyMaterial = struct {
-    /// Wrapped `*Material(Program)`, owned by the pool reference holder.
+    /// Borrowed `*Material` instance, owned by the caller.
     ptr: *anyopaque,
-    /// Destroys the wrapped material and frees its storage.
-    destroy_fn: *const fn (*anyopaque, std.mem.Allocator) void,
     /// Uploads cached uniforms (typed path inside). See `Material.use`.
     use_fn: *const fn (*anyopaque) void,
     /// Returns the associated program GL id, or 0 when absent.
@@ -1002,6 +997,8 @@ pub const AnyMaterial = struct {
     get_frag_field_fn: *const fn (*const anyopaque, u32, usize, []u8) gpu_meta.ResourceError!void,
     /// `@typeName` of the bound shader program (identity for comparisons).
     program_name: []const u8,
+    /// `@typeName` of the material type (identity for `cast`).
+    material_name: []const u8,
     /// `@typeName` of the vertex descriptor.
     program_vert_name: []const u8,
     /// `@typeName` of the fragment descriptor, if any.
@@ -1017,14 +1014,15 @@ pub const AnyMaterial = struct {
     /// Fragment uniform field descriptors (`field_id` == index).
     frag_fields: []const gpu_meta.UniformFieldDesc,
 
-    /// Wraps a typed material pointer. The record does not take ownership.
+    /// Wraps a borrowed material pointer. The record never takes ownership:
+    /// the caller keeps owning the instance (stack, ECS storage, arena).
     /// Parameters:
-    /// - ptr: `*Material(Program)` for any program.
+    /// - ptr: `*Material` for any material struct type.
     ///
     /// Returns: type-erased record.
     pub fn wrap(ptr: anytype) AnyMaterial {
         const M = std.meta.Child(@TypeOf(ptr));
-        if (!@hasDecl(M, "VertUniformT") or !@hasDecl(M, "FragUniformT") or !@hasDecl(M, "ShaderProgram")) @compileError("AnyMaterial.wrap expects *Material(Program), got " ++ @typeName(@TypeOf(ptr)));
+        if (!@hasDecl(M, "VertUniformT") or !@hasDecl(M, "FragUniformT") or !@hasDecl(M, "ShaderProgram")) @compileError("AnyMaterial.wrap expects a *Material struct pointer, got " ++ @typeName(@TypeOf(ptr)));
         const P = @TypeOf(ptr);
         const Prog = M.ShaderProgram;
         const VertU = M.VertUniformT;
@@ -1032,70 +1030,53 @@ pub const AnyMaterial = struct {
         const vert_fields = comptime gpu_meta.uniformFields(VertU);
         const frag_fields = comptime gpu_meta.uniformFields(FragU);
         const S = struct {
-            fn destroy(p: *anyopaque, alloc: std.mem.Allocator) void {
-                const m: P = @ptrCast(@alignCast(p));
-                m.destroy(alloc);
-            }
             fn use(p: *anyopaque) void {
                 const m: P = @ptrCast(@alignCast(p));
                 m.use();
             }
             fn getProgramId(p: *const anyopaque) u32 {
-                const m: P = @ptrCast(@alignCast(@constCast(p)));
-                const prog = m.getProgram() orelse return 0;
-                return prog.getId();
+                _ = p;
+                return Prog.getId();
             }
             fn readVert(p: *const anyopaque, out: []u8) gpu_meta.ResourceError!void {
                 if (out.len != @sizeOf(VertU)) return error.SizeMismatch;
                 const m: P = @ptrCast(@alignCast(@constCast(p)));
-                const tmp = m.getVertUniform();
-                @memcpy(out, std.mem.asBytes(&tmp));
+                @memcpy(out, std.mem.asBytes(&m.vertUniform));
             }
             fn writeVert(p: *anyopaque, bytes: []const u8) gpu_meta.ResourceError!void {
                 if (bytes.len != @sizeOf(VertU)) return error.SizeMismatch;
                 const m: P = @ptrCast(@alignCast(p));
-                var tmp: VertU = undefined;
-                @memcpy(std.mem.asBytes(&tmp), bytes);
-                m.setVertUniform(tmp);
+                @memcpy(std.mem.asBytes(&m.vertUniform), bytes);
             }
             fn readFrag(p: *const anyopaque, out: []u8) gpu_meta.ResourceError!void {
                 if (out.len != @sizeOf(FragU)) return error.SizeMismatch;
                 const m: P = @ptrCast(@alignCast(@constCast(p)));
-                const tmp = m.getFragUniform();
-                @memcpy(out, std.mem.asBytes(&tmp));
+                @memcpy(out, std.mem.asBytes(&m.fragUniform));
             }
             fn writeFrag(p: *anyopaque, bytes: []const u8) gpu_meta.ResourceError!void {
                 if (bytes.len != @sizeOf(FragU)) return error.SizeMismatch;
                 const m: P = @ptrCast(@alignCast(p));
-                var tmp: FragU = undefined;
-                @memcpy(std.mem.asBytes(&tmp), bytes);
-                m.setFragUniform(tmp);
+                @memcpy(std.mem.asBytes(&m.fragUniform), bytes);
             }
             fn setVertField(p: *anyopaque, field_id: u32, want_type: usize, bytes: []const u8) gpu_meta.ResourceError!void {
                 if (field_id >= vert_fields.len) return error.UnknownFieldId;
                 const m: P = @ptrCast(@alignCast(p));
-                var tmp = m.getVertUniform();
-                try gpu_meta.writeField(&tmp, vert_fields[field_id], want_type, bytes);
-                m.setVertUniform(tmp);
+                try gpu_meta.writeField(&m.vertUniform, vert_fields[field_id], want_type, bytes);
             }
             fn getVertField(p: *const anyopaque, field_id: u32, want_type: usize, out: []u8) gpu_meta.ResourceError!void {
                 if (field_id >= vert_fields.len) return error.UnknownFieldId;
                 const m: P = @ptrCast(@alignCast(@constCast(p)));
-                const tmp = m.getVertUniform();
-                try gpu_meta.readField(&tmp, vert_fields[field_id], want_type, out);
+                try gpu_meta.readField(&m.vertUniform, vert_fields[field_id], want_type, out);
             }
             fn setFragField(p: *anyopaque, field_id: u32, want_type: usize, bytes: []const u8) gpu_meta.ResourceError!void {
                 if (field_id >= frag_fields.len) return error.UnknownFieldId;
                 const m: P = @ptrCast(@alignCast(p));
-                var tmp = m.getFragUniform();
-                try gpu_meta.writeField(&tmp, frag_fields[field_id], want_type, bytes);
-                m.setFragUniform(tmp);
+                try gpu_meta.writeField(&m.fragUniform, frag_fields[field_id], want_type, bytes);
             }
             fn getFragField(p: *const anyopaque, field_id: u32, want_type: usize, out: []u8) gpu_meta.ResourceError!void {
                 if (field_id >= frag_fields.len) return error.UnknownFieldId;
                 const m: P = @ptrCast(@alignCast(@constCast(p)));
-                const tmp = m.getFragUniform();
-                try gpu_meta.readField(&tmp, frag_fields[field_id], want_type, out);
+                try gpu_meta.readField(&m.fragUniform, frag_fields[field_id], want_type, out);
             }
         };
         const inputs = comptime blk: {
@@ -1106,7 +1087,6 @@ pub const AnyMaterial = struct {
         };
         return .{
             .ptr = ptr,
-            .destroy_fn = S.destroy,
             .use_fn = S.use,
             .get_program_id_fn = S.getProgramId,
             .read_vert_fn = S.readVert,
@@ -1118,6 +1098,7 @@ pub const AnyMaterial = struct {
             .set_frag_field_fn = S.setFragField,
             .get_frag_field_fn = S.getFragField,
             .program_name = @typeName(Prog),
+            .material_name = @typeName(M),
             .program_vert_name = @typeName(Prog.Vert),
             .program_frag_name = if (Prog.HasFrag) @typeName(Prog.FragT) else null,
             .vertex_inputs = inputs,
@@ -1128,21 +1109,17 @@ pub const AnyMaterial = struct {
         };
     }
 
-    /// Downcasts back to a typed material. Returns null on program mismatch.
+    /// Downcasts back to a typed material. Returns null on type mismatch.
     /// Parameters:
     /// - self: record to downcast.
-    /// - Prog: expected shader program type.
+    /// - M: expected material struct type.
     ///
-    /// Returns: `*Material(Prog)` or null.
-    pub fn cast(self: *AnyMaterial, comptime Prog: type) ?*Material(Prog) {
-        if (!std.mem.eql(u8, self.program_name, @typeName(Prog))) return null;
+    /// Returns: `*M` or null.
+    pub fn cast(self: *AnyMaterial, comptime M: type) ?*M {
+        if (!std.mem.eql(u8, self.material_name, @typeName(M))) return null;
         return @ptrCast(@alignCast(self.ptr));
     }
 
-    /// Destroys the wrapped material (the abstracted resource).
-    pub fn destroy(self: *const AnyMaterial, alloc: std.mem.Allocator) void {
-        self.destroy_fn(self.ptr, alloc);
-    }
     /// Binds the program and uploads cached uniforms. See `Material.use`.
     pub fn use(self: *AnyMaterial) void {
         self.use_fn(self.ptr);
@@ -1200,7 +1177,7 @@ pub const AnyMaterial = struct {
     /// leaves the cache untouched (atomic commit). Upload to GL still happens
     /// explicitly via `use` — the cache batching is the edit/apply equivalent.
     pub const Editor = struct {
-        /// Record copy: immune to pool reallocations, borrows the material.
+        /// Record copy: borrows the caller-owned material instance.
         rec: AnyMaterial,
         /// Vertex uniform field descriptors for validation.
         vert_fields: []const gpu_meta.UniformFieldDesc,
@@ -1423,12 +1400,26 @@ test "mesh/program/material compatibility on fabricated records" {
     };
     const inputs = comptime gpu_meta.describe(ShaderVert.Vertex).fields;
     const prog_rec = AnyProgram{
-        .ptr = @ptrFromInt(0x10),
-        .destroy_fn = undefined,
-        .use_fn = undefined,
-        .get_id_fn = undefined,
-        .uniform_location_fn = undefined,
-        .upload_vert_fn = undefined,
+        .program_id = 0,
+        .destroy_fn = struct {
+            fn f() void {}
+        }.f,
+        .use_fn = struct {
+            fn f() void {}
+        }.f,
+        .get_id_fn = struct {
+            fn f() u32 {
+                return 0;
+            }
+        }.f,
+        .uniform_location_fn = struct {
+            fn f(_: UniformStage, _: u32) gpu_meta.ResourceError!i32 {
+                return -1;
+            }
+        }.f,
+        .upload_vert_fn = struct {
+            fn f(_: u32, _: usize, _: []const u8) gpu_meta.ResourceError!void {}
+        }.f,
         .upload_frag_fn = null,
         .vert_name = @typeName(ShaderVert),
         .frag_name = null,
@@ -1438,7 +1429,6 @@ test "mesh/program/material compatibility on fabricated records" {
         .vertex_inputs = inputs,
         .vert_fields = comptime gpu_meta.uniformFields(ShaderVert.Uniform),
         .frag_fields = &.{},
-        .gl_id = 0,
     };
     try std.testing.expect(meshAcceptsProgram(&mesh_rec, &prog_rec));
 
@@ -1452,7 +1442,6 @@ test "mesh/program/material compatibility on fabricated records" {
 
     var mat_rec = AnyMaterial{
         .ptr = @ptrFromInt(0x10),
-        .destroy_fn = undefined,
         .use_fn = undefined,
         .get_program_id_fn = undefined,
         .read_vert_fn = undefined,
@@ -1464,6 +1453,7 @@ test "mesh/program/material compatibility on fabricated records" {
         .set_frag_field_fn = undefined,
         .get_frag_field_fn = undefined,
         .program_name = "TestProg",
+        .material_name = "TestMat",
         .program_vert_name = @typeName(ShaderVert),
         .program_frag_name = null,
         .vertex_inputs = inputs,
@@ -1491,13 +1481,16 @@ const FakeProgramP = struct {
     pub const Vert = FakeVertP;
     pub const Frag = FakeFragP;
     pub const FragT = FakeFragP;
-    id: u32 = 0,
-    pub fn destroy(self: *@This(), alloc: std.mem.Allocator) void {
-        alloc.destroy(self);
+    var id: u32 = 42;
+    pub fn instance() u32 {
+        return id;
     }
-    pub fn use(_: *const @This()) void {}
-    pub fn getId(self: *const @This()) u32 {
-        return self.id;
+    pub fn getId() u32 {
+        return id;
+    }
+    pub fn use() void {}
+    pub fn destroy() void {
+        id = 0;
     }
 };
 const FakeProgramNoFrag = struct {
@@ -1505,18 +1498,21 @@ const FakeProgramNoFrag = struct {
     pub const Vert = FakeVertP;
     pub const Frag = null;
     pub const FragT = void;
-    id: u32 = 0,
-    pub fn destroy(self: *@This(), alloc: std.mem.Allocator) void {
-        alloc.destroy(self);
+    var id: u32 = 1;
+    pub fn instance() u32 {
+        return id;
     }
-    pub fn use(_: *const @This()) void {}
-    pub fn getId(self: *const @This()) u32 {
-        return self.id;
+    pub fn getId() u32 {
+        return id;
+    }
+    pub fn use() void {}
+    pub fn destroy() void {
+        id = 0;
     }
 };
 
-// Minimal fake material: quacks like `Material(Prog)` but touches no GL, so
-// the full `AnyMaterial` API (wrap/cast/fields/cache/Editor) is testable.
+// Minimal fake material: plain struct like `Material` (no create/destroy),
+// so the full `AnyMaterial` API (wrap/cast/fields/cache/Editor) is testable.
 const FakeVertU = struct { uMvp: f32, uFlag: bool };
 const FakeFragU = struct { uColor: f32 };
 const FakeProgM = struct {
@@ -1524,60 +1520,46 @@ const FakeProgM = struct {
         pub const Vertex = struct { position: [3]f32 };
     };
     pub const HasFrag = false;
-    id: u32 = 0,
-    pub fn getId(self: *const @This()) u32 {
-        return self.id;
+    var id: u32 = 7;
+    pub fn instance() u32 {
+        return id;
+    }
+    pub fn getId() u32 {
+        return id;
+    }
+    pub fn use() void {}
+    pub fn destroy() void {
+        id = 0;
     }
 };
 const FakeMat = struct {
     pub const VertUniformT = FakeVertU;
     pub const FragUniformT = FakeFragU;
     pub const ShaderProgram = FakeProgM;
-    prog: ?*FakeProgM,
-    vert: FakeVertU,
-    frag: FakeFragU,
+    vertUniform: FakeVertU,
+    fragUniform: FakeFragU,
     used: bool = false,
-    pub fn destroy(self: *@This(), alloc: std.mem.Allocator) void {
-        alloc.destroy(self);
-    }
     pub fn use(self: *@This()) void {
         self.used = true;
-    }
-    pub fn getProgram(self: *const @This()) ?*FakeProgM {
-        return self.prog;
-    }
-    pub fn getVertUniform(self: *const @This()) FakeVertU {
-        return self.vert;
-    }
-    pub fn setVertUniform(self: *@This(), u: FakeVertU) void {
-        self.vert = u;
-    }
-    pub fn getFragUniform(self: *const @This()) FakeFragU {
-        return self.frag;
-    }
-    pub fn setFragUniform(self: *@This(), u: FakeFragU) void {
-        self.frag = u;
     }
 };
 
 test "any program wrap/meta/validation without GL" {
-    const alloc = std.testing.allocator;
-    const p = try alloc.create(FakeProgramP);
-    p.* = .{ .id = 42 };
-    var rec = AnyProgram.wrap(p);
-    defer rec.destroy(alloc);
+    var rec = AnyProgram.wrap(FakeProgramP);
+    defer rec.destroy();
 
     try std.testing.expectEqualStrings(@typeName(FakeVertP), rec.vert_name);
     try std.testing.expect(rec.has_frag);
     try std.testing.expectEqualStrings(@typeName(FakeFragP), rec.frag_name.?);
-    try std.testing.expectEqual(@as(u32, 42), rec.gl_id);
+    try std.testing.expectEqual(@as(u32, 42), rec.program_id);
+    try std.testing.expectEqual(@as(u32, 42), rec.getId());
     try std.testing.expectEqual(@as(usize, 1), rec.vertex_inputs.len);
     try std.testing.expectEqual(@as(usize, 2), rec.vert_fields.len);
     try std.testing.expectEqual(@as(usize, 1), rec.frag_fields.len);
 
-    try std.testing.expect(rec.cast(FakeVertP, FakeFragP) == p);
-    try std.testing.expect(rec.cast(FakeVertP, null) == null);
-    try std.testing.expect(rec.cast(FakeFragP, FakeFragP) == null);
+    try std.testing.expect(rec.matches(FakeVertP, FakeFragP));
+    try std.testing.expect(!rec.matches(FakeVertP, null));
+    try std.testing.expect(!rec.matches(FakeFragP, FakeFragP));
 
     const tid_f32 = gpu_meta.typeId(f32);
     const id_scale = try rec.getVertUniformFieldId("uScale", tid_f32);
@@ -1594,32 +1576,23 @@ test "any program wrap/meta/validation without GL" {
     try std.testing.expectError(error.UnsupportedUniformField, rec.edit().setVertUniformFields(&bad_kind).apply());
 
     // vertex-only program: frag access reports UnknownFieldId
-    const p2 = try alloc.create(FakeProgramNoFrag);
-    p2.* = .{ .id = 1 };
-    var rec2 = AnyProgram.wrap(p2);
-    defer rec2.destroy(alloc);
+    var rec2 = AnyProgram.wrap(FakeProgramNoFrag);
+    defer rec2.destroy();
     try std.testing.expect(!rec2.has_frag);
-    try std.testing.expect(rec2.cast(FakeVertP, null) == p2);
+    try std.testing.expect(rec2.matches(FakeVertP, null));
     try std.testing.expectError(error.UnknownFieldId, rec2.getFragUniformFieldId("uColor", tid_f32));
     const bad_frag = [_]UniformFieldItem{.{ .field_id = 0, .type_id = tid_f32, .bytes = std.mem.asBytes(&id_scale) }};
     try std.testing.expectError(error.UnknownFieldId, rec2.edit().setFragUniformFields(&bad_frag).apply());
 }
 
 test "any material wrap/fields/cache/editor without GL" {
-    const alloc = std.testing.allocator;
-    var prog = FakeProgM{ .id = 7 };
-    const m = try alloc.create(FakeMat);
-    m.* = .{ .prog = &prog, .vert = .{ .uMvp = 1.0, .uFlag = false }, .frag = .{ .uColor = 0.5 }, .used = false };
-    var rec = AnyMaterial.wrap(m);
-    defer rec.destroy(alloc);
+    var m: FakeMat = .{ .vertUniform = .{ .uMvp = 1.0, .uFlag = false }, .fragUniform = .{ .uColor = 0.5 }, .used = false };
+    var rec = AnyMaterial.wrap(&m);
 
     try std.testing.expectEqualStrings(@typeName(FakeProgM), rec.program_name);
-    try std.testing.expect(rec.cast(FakeProgM) == m);
+    try std.testing.expect(rec.cast(FakeMat) == &m);
     try std.testing.expect(rec.cast(struct {}) == null);
     try std.testing.expectEqual(@as(u32, 7), rec.getProgramId());
-    m.prog = null;
-    try std.testing.expectEqual(@as(u32, 0), rec.getProgramId());
-    m.prog = &prog;
 
     const tid_f32 = gpu_meta.typeId(f32);
     const tid_bool = gpu_meta.typeId(bool);

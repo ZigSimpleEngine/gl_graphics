@@ -24,8 +24,14 @@ pub const Camera = @import("camera.zig").Camera;
 /// Shader program, parameterized by vertex and fragment shaders.
 pub const ShaderProgram = @import("shader_program.zig").ShaderProgram;
 
+/// Vertex-only shader program, parameterized by a vertex shader.
+pub const VertexProgram = @import("shader_program.zig").VertexProgram;
+
 /// Material — container for uniforms and program.
 pub const Material = @import("material.zig").Material;
+
+/// Vertex-only material — container for vertex uniforms and program.
+pub const VertexMaterial = @import("material.zig").VertexMaterial;
 
 /// Compile-time type metadata for resource abstractions (no GL dependency).
 pub const gpu_meta = @import("gpu_meta.zig");
@@ -152,9 +158,13 @@ test "smoke — texture opaque + editor chain" {
     _ = Transform(f32);
     _ = Map(.my_map, struct { a: i32 });
     _ = ShaderProgram(DummyVert, DummyFrag);
-    const DummyMat = Material(DummyVert.Uniform{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, DummyFrag.Uniform{ .uColor = math.Vec(4, f32).zero() });
+    _ = VertexProgram(DummyVert);
+    const DummyMat = Material(DummyVert.Uniform, .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, DummyFrag.Uniform, .{ .uColor = math.Vec(4, f32).zero() });
     const dummy_mat: DummyMat = .{};
     _ = dummy_mat;
+    const DummyVertMat = VertexMaterial(DummyVert.Uniform, .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) });
+    const dummy_vert_mat: DummyVertMat = .{};
+    _ = dummy_vert_mat;
     _ = Framebuffer;
     _ = Camera(f32);
 }

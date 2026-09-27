@@ -3,66 +3,67 @@ const std = @import("std");
 /// OpenGL bindings import.
 const gl = @import("gl");
 
-/// Creates a shader program type for given vertex and optional fragment descriptors.
+/// Links a program from compiled shader ids.
+/// `fs_id` is a runtime optional `u32`, not an optional type parameter.
+fn linkProgram(vs_id: u32, fs_id: ?u32) u32 {
+    const prog_id = gl.programs.create();
+    gl.programs.attach(prog_id, vs_id);
+    if (fs_id) |fs| gl.programs.attach(prog_id, fs);
+    gl.programs.link(prog_id);
+    var ok: i32 = 0;
+    gl.programs.getParameter(prog_id, .link_status, @ptrCast(&ok));
+    if (ok == 0) {
+        var log: [512]u8 = undefined;
+        _ = gl.programs.getInfoLog(prog_id, &log);
+    }
+    return prog_id;
+}
+
+/// Caches live uniform locations into a descriptor `IdCache`.
+/// The cache must expose one `i32` field per `Uniform` field name.
+fn fillIdCache(prog_id: u32, comptime Uniform: type, cache_ptr: anytype) void {
+    inline for (@typeInfo(Uniform).@"struct".fields) |field| {
+        const loc = gl.uniforms.location(prog_id, @ptrCast(field.name));
+        @field(cache_ptr.*, field.name) = loc;
+    }
+}
+
+/// Creates a shader program type for given vertex and fragment descriptors.
 /// Comptime singleton: each unique (vert, frag) pair gets its own private state,
-/// no instances, no allocator, no pointers.
+/// no instances, no allocator, no pointers. Both descriptors are concrete
+/// types (no optional type parameters); every descriptor must expose
+/// `Uniform`, `IdCache`, `instance`, `edit` and `Editor`.
 /// Parameters:
-/// - vert_: vertex shader descriptor type.
-/// - frag_: optional fragment shader descriptor type.
+/// - vert: vertex shader descriptor type.
+/// - frag: fragment shader descriptor type.
 ///
 /// Returns: stateless shader program struct type.
-pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
-    const has_frag = frag_ != null;
-    const FragType = if (has_frag) frag_.? else void;
-
+pub fn ShaderProgram(comptime vert: type, comptime frag: type) type {
     return struct {
         /// Vertex descriptor type.
-        pub const Vert = vert_;
-        /// Optional fragment descriptor type.
-        pub const Frag = frag_;
-        /// True when a fragment stage is configured.
-        pub const HasFrag = has_frag;
-        /// Resolved fragment type alias.
-        pub const FragT = FragType;
+        pub const Vert = vert;
+        /// Fragment descriptor type.
+        pub const Frag = frag;
+        /// Always true: this program has a fragment stage.
+        pub const HasFrag = true;
 
         /// OpenGL program identifier (private singleton state).
         var id: u32 = 0;
         /// Whether the program has been linked (private singleton state).
         var initialized: bool = false;
         /// Cached vertex uniform locations (private singleton state).
-        var vert_cache: if (@hasDecl(Vert, "IdCache")) Vert.IdCache else void = if (@hasDecl(Vert, "IdCache")) std.mem.zeroes(Vert.IdCache) else {};
+        var vert_cache: Vert.IdCache = std.mem.zeroes(Vert.IdCache);
         /// Cached fragment uniform locations (private singleton state).
-        var frag_cache: if (has_frag) FragType.IdCache else void = if (has_frag) std.mem.zeroes(FragType.IdCache) else {};
+        var frag_cache: Frag.IdCache = std.mem.zeroes(Frag.IdCache);
 
         /// Returns the singleton program id, linking on first call.
         ///
         /// Returns: OpenGL program identifier.
         pub fn instance() u32 {
             if (initialized and id != 0) return id;
-            const prog_id = gl.programs.create();
-            const vs = Vert.instance();
-            gl.programs.attach(prog_id, vs);
-            if (has_frag) {
-                const fs = FragType.instance();
-                gl.programs.attach(prog_id, fs);
-            }
-            gl.programs.link(prog_id);
-            var ok: i32 = 0;
-            gl.programs.getParameter(prog_id, .link_status, @ptrCast(&ok));
-            if (ok == 0) {
-                var log: [512]u8 = undefined;
-                _ = gl.programs.getInfoLog(prog_id, &log);
-            }
-            inline for (@typeInfo(Vert.Uniform).@"struct".fields) |field| {
-                const loc = gl.uniforms.location(prog_id, @ptrCast(field.name));
-                @field(vert_cache, field.name) = loc;
-            }
-            if (has_frag) {
-                inline for (@typeInfo(FragType.Uniform).@"struct".fields) |field| {
-                    const loc = gl.uniforms.location(prog_id, @ptrCast(field.name));
-                    @field(frag_cache, field.name) = loc;
-                }
-            }
+            const prog_id = linkProgram(Vert.instance(), Frag.instance());
+            fillIdCache(prog_id, Vert.Uniform, &vert_cache);
+            fillIdCache(prog_id, Frag.Uniform, &frag_cache);
             id = prog_id;
             initialized = true;
             return id;
@@ -92,14 +93,14 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         /// Returns the cached vertex uniform locations.
         ///
         /// Returns: copy of vertex IdCache.
-        pub fn getVertCache() if (@hasDecl(Vert, "IdCache")) Vert.IdCache else void {
+        pub fn getVertCache() Vert.IdCache {
             return vert_cache;
         }
         /// Returns the cached fragment uniform locations.
         ///
-        /// Returns: copy of fragment IdCache or empty struct when no fragment stage.
-        pub fn getFragCache() if (has_frag) FragType.IdCache else void {
-            if (has_frag) return frag_cache else return {};
+        /// Returns: copy of fragment IdCache.
+        pub fn getFragCache() Frag.IdCache {
+            return frag_cache;
         }
 
         /// Binds the singleton program for rendering (links on first call).
@@ -117,9 +118,88 @@ pub fn ShaderProgram(comptime vert_: type, comptime frag_: ?type) type {
         }
         /// Returns a fragment uniform editor bound to the singleton program.
         ///
-        /// Returns: fragment Editor or void when no fragment stage.
-        pub fn fragEdit() if (has_frag) FragType.Editor else void {
-            if (has_frag) return FragType.edit(instance()) else return {};
+        /// Returns: fragment Editor.
+        pub fn fragEdit() Frag.Editor {
+            return Frag.edit(instance());
+        }
+    };
+}
+
+/// Creates a vertex-only shader program type for a given vertex descriptor.
+/// Comptime singleton with the same rules as `ShaderProgram`, but without
+/// any fragment stage: no `Frag` decl, no frag cache, no `fragEdit`.
+/// The vertex descriptor must expose `Uniform`, `IdCache`, `instance`,
+/// `edit` and `Editor`.
+/// Parameters:
+/// - vert: vertex shader descriptor type.
+///
+/// Returns: stateless vertex-only program struct type.
+pub fn VertexProgram(comptime vert: type) type {
+    return struct {
+        /// Vertex descriptor type.
+        pub const Vert = vert;
+        /// Always false: this program has no fragment stage.
+        pub const HasFrag = false;
+
+        /// OpenGL program identifier (private singleton state).
+        var id: u32 = 0;
+        /// Whether the program has been linked (private singleton state).
+        var initialized: bool = false;
+        /// Cached vertex uniform locations (private singleton state).
+        var vert_cache: Vert.IdCache = std.mem.zeroes(Vert.IdCache);
+
+        /// Returns the singleton program id, linking on first call.
+        ///
+        /// Returns: OpenGL program identifier.
+        pub fn instance() u32 {
+            if (initialized and id != 0) return id;
+            const prog_id = linkProgram(Vert.instance(), null);
+            fillIdCache(prog_id, Vert.Uniform, &vert_cache);
+            id = prog_id;
+            initialized = true;
+            return id;
+        }
+
+        /// Deletes the program and resets singleton state.
+        ///
+        /// Returns: void.
+        pub fn destroy() void {
+            if (gl.loader.loaded() and id != 0) gl.programs.delete(id);
+            id = 0;
+            initialized = false;
+        }
+
+        /// Returns the cached OpenGL program identifier without linking.
+        ///
+        /// Returns: program id (0 when not yet created).
+        pub fn getId() u32 {
+            return id;
+        }
+        /// Returns whether the program has been linked.
+        ///
+        /// Returns: true after a successful `instance()` call.
+        pub fn isInitialized() bool {
+            return initialized and id != 0;
+        }
+        /// Returns the cached vertex uniform locations.
+        ///
+        /// Returns: copy of vertex IdCache.
+        pub fn getVertCache() Vert.IdCache {
+            return vert_cache;
+        }
+
+        /// Binds the singleton program for rendering (links on first call).
+        ///
+        /// Returns: void.
+        pub fn use() void {
+            gl.programs.use(instance());
+        }
+
+        /// Returns a vertex uniform editor bound to the singleton program.
+        ///
+        /// Returns: vertex Editor.
+        pub fn vertEdit() Vert.Editor {
+            return Vert.edit(instance());
         }
     };
 }

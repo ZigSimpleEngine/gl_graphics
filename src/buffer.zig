@@ -54,6 +54,18 @@ pub fn Buffer(comptime data_: type) type {
         /// Element type stored in this buffer instantiation.
         pub const DataType = data_;
 
+        /// Wraps this buffer as a type-erased `AnyBuffer`.
+        /// Preferred entry point over `AnyBuffer.wrap(buf)`: thin forward,
+        /// same borrow semantics (record never owns the instance).
+        /// Parameters:
+        ///   - self: Buffer to wrap.
+        ///
+        /// Returns:
+        ///   - Type-erased record borrowing `self`.
+        pub fn asAnyBuffer(self: *Self) @import("handles.zig").AnyBuffer {
+            return @import("handles.zig").AnyBuffer.wrap(self);
+        }
+
         /// Creates a new buffer object.
         /// Allocates `Impl`, initializes it with defaults and generates a GL buffer name.
         /// Parameters:
@@ -560,6 +572,8 @@ pub fn Buffer(comptime data_: type) type {
             /// Binds the buffer as needed, executes `bufferData`, `bufferSubData`,
             /// `copySubData`, `bindBase`, `bindRange`, `map`, `flushMappedRange`
             /// and `unmap` operations in order, then resets pending state.
+            /// An explicit `setUsage` wins over the usage embedded in a
+            /// `setData`/`setDataBytes`/`reserve` payload staged in the same batch.
             /// Parameters:
             ///   - self: Editor instance holding pending operations.
             ///
@@ -569,27 +583,31 @@ pub fn Buffer(comptime data_: type) type {
                 const loaded = gl.loader.loaded();
                 const buf = @constCast(self)._buffer.impl();
                 const target = @constCast(self)._pending_target orelse buf.target;
+                const usage_override = @constCast(self)._pending_usage;
                 if (@constCast(self)._pending_target) |t| buf.target = t;
-                if (@constCast(self)._pending_usage) |u| buf.usage = u;
+                if (usage_override) |u| buf.usage = u;
                 if (@constCast(self)._pending_data) |d| {
+                    const eff_usage = usage_override orelse d.usage;
                     if (loaded) gl.buffers.bind(target, buf.id);
                     const bytes: []const u8 = std.mem.sliceAsBytes(d.slice);
-                    if (loaded) gl.buffers.bufferData(target, bytes.len, bytes.ptr, d.usage);
+                    if (loaded) gl.buffers.bufferData(target, bytes.len, bytes.ptr, eff_usage);
                     buf.size_bytes = bytes.len;
                     buf.count = d.slice.len;
-                    buf.usage = d.usage;
+                    buf.usage = eff_usage;
                 } else if (@constCast(self)._pending_data_bytes) |d| {
+                    const eff_usage = usage_override orelse d.usage;
                     if (loaded) gl.buffers.bind(target, buf.id);
-                    if (loaded) gl.buffers.bufferData(target, d.bytes.len, d.bytes.ptr, d.usage);
+                    if (loaded) gl.buffers.bufferData(target, d.bytes.len, d.bytes.ptr, eff_usage);
                     buf.size_bytes = d.bytes.len;
                     buf.count = d.bytes.len / @sizeOf(data_);
-                    buf.usage = d.usage;
+                    buf.usage = eff_usage;
                 } else if (@constCast(self)._pending_reserve) |r| {
+                    const eff_usage = usage_override orelse r.usage;
                     if (loaded) gl.buffers.bind(target, buf.id);
-                    if (loaded) gl.buffers.bufferData(target, r.size_bytes, null, r.usage);
+                    if (loaded) gl.buffers.bufferData(target, r.size_bytes, null, eff_usage);
                     buf.size_bytes = r.size_bytes;
                     buf.count = r.size_bytes / @sizeOf(data_);
-                    buf.usage = r.usage;
+                    buf.usage = eff_usage;
                 }
                 if (@constCast(self)._pending_sub_data) |s| {
                     if (loaded) gl.buffers.bind(target, buf.id);
@@ -652,7 +670,7 @@ pub fn Buffer(comptime data_: type) type {
                 const buf = @constCast(self)._buffer.impl();
                 const target = @constCast(self)._pending_target orelse buf.target;
                 var ok: bool = false;
-                if (gl.loader.loaded()) ok = gl.buffers.unmap(target) != 0;
+                if (gl.loader.loaded()) ok = gl.buffers.unmap(target);
                 buf.mapped = !ok;
                 if (ok) buf.access = null;
                 return ok;

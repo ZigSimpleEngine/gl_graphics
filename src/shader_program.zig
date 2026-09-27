@@ -110,6 +110,15 @@ pub fn ShaderProgram(comptime vert: type, comptime frag: type) type {
             gl.programs.use(instance());
         }
 
+        /// Wraps this program type as a type-erased `AnyProgram`.
+        /// Preferred entry point over `AnyProgram.wrap(Prog)`: thin forward,
+        /// same ownership rules (record never owns the singleton).
+        ///
+        /// Returns: type-erased record.
+        pub fn asAnyProgram() @import("handles.zig").AnyProgram {
+            return @import("handles.zig").AnyProgram.wrap(@This());
+        }
+
         /// Returns a vertex uniform editor bound to the singleton program.
         ///
         /// Returns: vertex Editor.
@@ -193,6 +202,15 @@ pub fn VertexProgram(comptime vert: type) type {
         /// Returns: void.
         pub fn use() void {
             gl.programs.use(instance());
+        }
+
+        /// Wraps this vertex-only program type as a type-erased `AnyProgram`.
+        /// Preferred entry point over `AnyProgram.wrapVertex(Prog)`: thin forward,
+        /// same ownership rules (record never owns the singleton).
+        ///
+        /// Returns: type-erased record.
+        pub fn asAnyProgram() @import("handles.zig").AnyProgram {
+            return @import("handles.zig").AnyProgram.wrapVertex(@This());
         }
 
         /// Returns a vertex uniform editor bound to the singleton program.

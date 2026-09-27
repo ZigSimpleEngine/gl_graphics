@@ -284,3 +284,54 @@ test "buffer editor chain const" {
     buf.edit().setData(data[0..], .static_draw).apply();
     buf.edit().setSubDataTyped(0, data[0..]).apply();
 }
+
+test "framebuffer and camera cached paths without GL" {
+    const gpa = std.testing.allocator;
+    const fb = try Framebuffer.create(gpa);
+    defer fb.destroy(gpa);
+    try std.testing.expectEqual(@as(u32, 1), fb.getId());
+    _ = fb.getTarget();
+    _ = fb.getWidth();
+    _ = fb.getHeight();
+    _ = fb.getColorAttachment(0);
+    _ = fb.getDepthAttachment();
+    _ = fb.getStencilAttachment();
+    _ = fb.getDepthStencilAttachment();
+    _ = fb.getDrawBuffers();
+    fb.edit().setTarget(.framebuffer).setSize(64, 48).apply();
+    try std.testing.expectEqual(@as(i32, 64), fb.getWidth());
+    try std.testing.expectEqual(@as(i32, 48), fb.getHeight());
+    fb.edit().setColorAttachment(0, 7, .texture_2d, 0).apply();
+    try std.testing.expectEqual(@as(?u32, 7), fb.getColorAttachment(0));
+    // Live-GL entry points: analyze only, never execute headless.
+    _ = &Framebuffer.bind;
+    _ = &Framebuffer.bindTo;
+    _ = &Framebuffer.use;
+    _ = &Framebuffer.bindDefault;
+    _ = &Framebuffer.useDefault;
+    _ = &Framebuffer.getStatus;
+    _ = &Framebuffer.isComplete;
+    _ = &Framebuffer.getAttachmentParameter;
+    _ = &Framebuffer.isValid;
+
+    const C = Camera(f32);
+    const cam = try C.create(gpa);
+    defer cam.destroy(gpa);
+    _ = cam.getFovY();
+    _ = cam.getAspect();
+    _ = cam.getNear();
+    _ = cam.getFar();
+    _ = cam.getProjection();
+    _ = cam.getView();
+    _ = cam.getViewProjection();
+    _ = cam.getViewport();
+    _ = cam.isPerspective();
+    _ = cam.isOrtho();
+    cam.edit().setFovY(1.0).setAspect(1.5).setNear(0.1).setFar(100.0).apply();
+    try std.testing.expectEqual(@as(f32, 1.0), cam.getFovY());
+    cam.edit().setPerspective(0.9, 1.4, 0.2, 200.0).apply();
+    cam.edit().setOrtho(-1, 1, -1, 1, 0.1, 100.0).apply();
+    // GL-touching: analyze only.
+    _ = &C.use;
+    _ = &C.applyViewport;
+}

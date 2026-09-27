@@ -257,6 +257,17 @@ pub fn Material(
             uploadVertUniform(Prog, self.vertUniform);
             uploadFragUniform(Prog, self.fragUniform);
         }
+
+        /// Wraps this material as a type-erased `AnyMaterial`.
+        /// Preferred entry point over `AnyMaterial.wrap(&m)`: thin forward,
+        /// same borrow semantics (record never owns the instance).
+        /// Parameters:
+        /// - self: material pointer.
+        ///
+        /// Returns: type-erased record borrowing `self`.
+        pub fn asAnyMaterial(self: *Self) @import("handles.zig").AnyMaterial {
+            return @import("handles.zig").AnyMaterial.wrap(self);
+        }
     };
 }
 
@@ -342,6 +353,17 @@ pub fn VertexMaterial(comptime vert_uniform: type, comptime vert_uniform_value: 
         pub fn use(self: *Self) void {
             Prog.use();
             uploadVertUniform(Prog, self.vertUniform);
+        }
+
+        /// Wraps this vertex-only material as a type-erased `AnyMaterial`.
+        /// Preferred entry point over `AnyMaterial.wrapVertex(&m)`: thin forward,
+        /// same borrow semantics (record never owns the instance).
+        /// Parameters:
+        /// - self: material pointer.
+        ///
+        /// Returns: type-erased record borrowing `self`.
+        pub fn asAnyMaterial(self: *Self) @import("handles.zig").AnyMaterial {
+            return @import("handles.zig").AnyMaterial.wrapVertex(self);
         }
     };
 }
@@ -449,4 +471,31 @@ test "vertex material from uniform type and default" {
 
     try std.testing.expectError(error.FieldNotFound, MV.getVertUniformFieldId("nope", f32));
     try std.testing.expectError(error.UnknownFieldId, self.getVertUniformData(99, f32));
+}
+
+test "asAnyMaterial roundtrips through AnyMaterial without GL" {
+    const AnyMaterial = @import("handles.zig").AnyMaterial;
+    const M = Material(DummyVert.Uniform, .{ .uA = 1.0, .uB = 2 }, DummyFrag.Uniform, .{ .uC = 3 });
+    var m: M = .{};
+    var rec: AnyMaterial = m.asAnyMaterial();
+    try std.testing.expect(rec.has_frag);
+    try std.testing.expect(rec.cast(M) == &m);
+    try std.testing.expectEqualStrings(@typeName(M), rec.material_name);
+
+    // CPU-side cache access only: no `use()` (that would link the GL program).
+    const tid_f32 = gpu_meta.typeId(f32);
+    const id_a = try rec.getVertUniformFieldId("uA", tid_f32);
+    var two: f32 = 2.0;
+    try rec.setVertUniformData(id_a, tid_f32, std.mem.asBytes(&two));
+    var got: f32 = 0;
+    try rec.getVertUniformData(id_a, tid_f32, std.mem.asBytes(&got));
+    try std.testing.expectEqual(@as(f32, 2.0), got);
+    try std.testing.expectEqual(@as(f32, 2.0), m.vertUniform.uA);
+
+    const MV = VertexMaterial(DummyVert.Uniform, .{ .uA = 0.5, .uB = -1 });
+    var vm: MV = .{};
+    var vrec: AnyMaterial = vm.asAnyMaterial();
+    try std.testing.expect(!vrec.has_frag);
+    try std.testing.expect(vrec.cast(MV) == &vm);
+    try std.testing.expect(vrec.cast(M) == null);
 }

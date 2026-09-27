@@ -94,6 +94,8 @@ pub const AnyBuffer = struct {
 
     /// Wraps a typed buffer pointer. The record does not take ownership:
     /// destroy exactly once via `remove` + `destroy`.
+    /// Preferred entry point is `buf.asAnyBuffer()` on the concrete type;
+    /// this `wrap` is the underlying implementation.
     /// Parameters:
     /// - ptr: `*Buffer(T)` for any `T`.
     ///
@@ -458,6 +460,8 @@ pub const AnyMesh = struct {
     };
 
     /// Wraps a typed mesh pointer. The record does not take ownership.
+    /// Preferred entry point is `mesh.asAnyMesh()` on the concrete type;
+    /// this `wrap` is the underlying implementation.
     /// Parameters:
     /// - ptr: `*Mesh(Vertex)` for any `Vertex`.
     ///
@@ -825,6 +829,8 @@ pub const AnyProgram = struct {
 
     /// Wraps a full shader program type. The record does not take ownership:
     /// the program stays a comptime singleton owned by its own static state.
+    /// Preferred entry point is `Prog.asAnyProgram()` on the concrete type;
+    /// this `wrap` is the underlying implementation.
     /// Parameters:
     /// - Prog: `ShaderProgram(Vert, Frag)` type for any descriptors.
     ///
@@ -878,6 +884,8 @@ pub const AnyProgram = struct {
     /// Wraps a vertex-only program type. Same ownership rules as `wrap`;
     /// the fragment side of the record is empty (`upload_frag_fn` null,
     /// `frag_name` null, empty fragment descriptors).
+    /// Preferred entry point is `Prog.asAnyProgram()` on the concrete type;
+    /// this `wrapVertex` is the underlying implementation.
     /// Parameters:
     /// - Prog: `VertexProgram(Vert)` type for any vertex descriptor.
     ///
@@ -1134,6 +1142,8 @@ pub const AnyMaterial = struct {
 
     /// Wraps a borrowed full material pointer. The record never takes ownership:
     /// the caller keeps owning the instance (stack, ECS storage, arena).
+    /// Preferred entry point is `m.asAnyMaterial()` on the concrete type;
+    /// this `wrap` is the underlying implementation.
     /// Parameters:
     /// - ptr: `*Material` for any full material struct type.
     ///
@@ -1217,6 +1227,8 @@ pub const AnyMaterial = struct {
     /// Wraps a borrowed vertex-only material pointer. Same ownership rules as
     /// `wrap`; the fragment side is empty and every fragment access reports
     /// `UnknownFieldId`.
+    /// Preferred entry point is `m.asAnyMaterial()` on the concrete type;
+    /// this `wrapVertex` is the underlying implementation.
     /// Parameters:
     /// - ptr: `*VertexMaterial` for any vertex-only material struct type.
     ///
@@ -1469,7 +1481,9 @@ test "any mesh wrap/cast/uploads without GL" {
     try std.testing.expectEqual(@sizeOf(V), rec.stride);
     try std.testing.expectEqual(@as(usize, 2), rec.getFieldCount());
     try std.testing.expect(rec.cast(V) == mesh);
-    try std.testing.expect(rec.cast(u32) == null);
+    // NOTE: only struct types are valid vertices (`Mesh` rejects the rest at
+    // comptime), so mismatch is probed with a different struct, not `u32`.
+    try std.testing.expect(rec.cast(struct { nope: u8 }) == null);
     try std.testing.expect(rec.layout.len == 2);
 
     const verts = [_]V{
@@ -1707,6 +1721,7 @@ const FakeProgM = struct {
     pub const Vert = struct {
         pub const Vertex = struct { position: [3]f32 };
     };
+    pub const Frag = FakeFragP;
     pub const HasFrag = false;
     var id: u32 = 7;
     pub fn instance() u32 {
@@ -1880,4 +1895,71 @@ test "any vertex material wrap without GL" {
 
     rec.use();
     try std.testing.expect(m.used);
+}
+
+test "asAny forwarders on concrete types without GL" {
+    const alloc = std.testing.allocator;
+
+    const B = Buffer(f32);
+    const buf = try B.create(alloc);
+    defer buf.destroy(alloc);
+    var brec = buf.asAnyBuffer();
+    try std.testing.expect(brec.cast(f32) == buf);
+    try std.testing.expect(brec.cast(u16) == null);
+
+    const math = @import("math");
+    const V = struct { pos: math.Vec(3, f32) };
+    const M = Mesh(V);
+    const mesh = try M.create(alloc);
+    defer mesh.destroy(alloc);
+    var mrec = mesh.asAnyMesh();
+    try std.testing.expect(mrec.cast(V) == mesh);
+    // NOTE: only struct types are valid vertices, so mismatch is probed
+    // with a different struct rather than a scalar.
+    try std.testing.expect(mrec.cast(struct { nope: u8 }) == null);
+
+    // Programs are comptime singletons: referencing the forwarder decl
+    // monomorphizes its body (and the wrap call) without executing any GL.
+    const VD = struct {
+        pub const Uniform = struct { uA: f32 };
+        pub const IdCache = struct { uA: i32 };
+        pub const Editor = struct {
+            pub fn setUniform(self: *@This(), u: Uniform) *@This() {
+                _ = u;
+                return self;
+            }
+            pub fn apply(self: *@This()) void {
+                _ = self;
+            }
+        };
+        pub fn instance() u32 {
+            return 0;
+        }
+        pub fn edit(_: u32) Editor {
+            return .{};
+        }
+    };
+    const FD = struct {
+        pub const Uniform = struct { uB: f32 };
+        pub const IdCache = struct { uB: i32 };
+        pub const Editor = struct {
+            pub fn setUniform(self: *@This(), u: Uniform) *@This() {
+                _ = u;
+                return self;
+            }
+            pub fn apply(self: *@This()) void {
+                _ = self;
+            }
+        };
+        pub fn instance() u32 {
+            return 0;
+        }
+        pub fn edit(_: u32) Editor {
+            return .{};
+        }
+    };
+    const P = @import("shader_program.zig").ShaderProgram(VD, FD);
+    const VP = @import("shader_program.zig").VertexProgram(VD);
+    _ = &P.asAnyProgram;
+    _ = &VP.asAnyProgram;
 }

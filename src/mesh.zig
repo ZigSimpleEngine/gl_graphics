@@ -220,6 +220,17 @@ pub fn Mesh(comptime Vertex: type) type {
         /// Vertex type for this mesh specialization.
         pub const VertexType = Vertex;
 
+        /// Wraps this mesh as a type-erased `AnyMesh`.
+        /// Preferred entry point over `AnyMesh.wrap(mesh)`: thin forward,
+        /// same borrow semantics (record never owns the instance).
+        /// Parameters:
+        /// - `self`: Mesh to wrap.
+        ///
+        /// Returns: Type-erased record borrowing `self`.
+        pub fn asAnyMesh(self: *Self) @import("handles.zig").AnyMesh {
+            return @import("handles.zig").AnyMesh.wrap(self);
+        }
+
         /// SOA form of `Vertex`: struct where each vertex field is represented as a slice.
         /// Use as `Mesh.SOA` or `VertexType.SOA`-like via `Mesh.SOA`. Each field has type `[]const FieldType`.
         pub const SOA = blk: {

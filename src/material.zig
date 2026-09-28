@@ -5,6 +5,9 @@ const ShaderProgramFn = @import("shader_program.zig").ShaderProgram;
 const VertexProgramFn = @import("shader_program.zig").VertexProgram;
 /// Compile-time type metadata import.
 const gpu_meta = @import("gpu_meta.zig");
+/// Type-erased handle imports (for `asAnyMaterial` forwarders).
+const handles = @import("handles.zig");
+const AnyMaterial = handles.AnyMaterial;
 
 /// Validates that `U` is a shader-owned uniform struct and returns its owner.
 ///
@@ -265,8 +268,8 @@ pub fn Material(
         /// - self: material pointer.
         ///
         /// Returns: type-erased record borrowing `self`.
-        pub fn asAnyMaterial(self: *Self) @import("handles.zig").AnyMaterial {
-            return @import("handles.zig").AnyMaterial.wrap(self);
+        pub fn asAnyMaterial(self: *Self) AnyMaterial {
+            return AnyMaterial.wrap(self);
         }
     };
 }
@@ -362,8 +365,8 @@ pub fn VertexMaterial(comptime vert_uniform: type, comptime vert_uniform_value: 
         /// - self: material pointer.
         ///
         /// Returns: type-erased record borrowing `self`.
-        pub fn asAnyMaterial(self: *Self) @import("handles.zig").AnyMaterial {
-            return @import("handles.zig").AnyMaterial.wrapVertex(self);
+        pub fn asAnyMaterial(self: *Self) AnyMaterial {
+            return AnyMaterial.wrapVertex(self);
         }
     };
 }
@@ -474,7 +477,6 @@ test "vertex material from uniform type and default" {
 }
 
 test "asAnyMaterial roundtrips through AnyMaterial without GL" {
-    const AnyMaterial = @import("handles.zig").AnyMaterial;
     const M = Material(DummyVert.Uniform, .{ .uA = 1.0, .uB = 2 }, DummyFrag.Uniform, .{ .uC = 3 });
     var m: M = .{};
     var rec: AnyMaterial = m.asAnyMaterial();

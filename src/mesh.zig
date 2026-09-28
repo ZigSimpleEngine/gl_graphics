@@ -1,6 +1,9 @@
 const std = @import("std");
 const gl = @import("gl");
 const math = @import("math");
+/// Type-erased handle imports (for `asAnyMesh` forwarder).
+const handles = @import("handles.zig");
+const AnyMesh = handles.AnyMesh;
 
 /// Maps a scalar Zig type to the corresponding OpenGL data type.
 /// Parameters:
@@ -227,8 +230,8 @@ pub fn Mesh(comptime Vertex: type) type {
         /// - `self`: Mesh to wrap.
         ///
         /// Returns: Type-erased record borrowing `self`.
-        pub fn asAnyMesh(self: *Self) @import("handles.zig").AnyMesh {
-            return @import("handles.zig").AnyMesh.wrap(self);
+        pub fn asAnyMesh(self: *Self) AnyMesh {
+            return AnyMesh.wrap(self);
         }
 
         /// SOA form of `Vertex`: struct where each vertex field is represented as a slice.

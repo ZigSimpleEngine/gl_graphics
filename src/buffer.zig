@@ -2,6 +2,9 @@
 const std = @import("std");
 /// OpenGL bindings import providing buffer targets, usage flags and GL buffer functions.
 const gl = @import("gl");
+/// Type-erased handle imports (for `asAnyBuffer` forwarder).
+const handles = @import("handles.zig");
+const AnyBuffer = handles.AnyBuffer;
 
 /// Creates a generic OpenGL buffer wrapper parameterized by element type.
 /// Provides an opaque handle around a GL buffer object with cached state and
@@ -62,8 +65,8 @@ pub fn Buffer(comptime data_: type) type {
         ///
         /// Returns:
         ///   - Type-erased record borrowing `self`.
-        pub fn asAnyBuffer(self: *Self) @import("handles.zig").AnyBuffer {
-            return @import("handles.zig").AnyBuffer.wrap(self);
+        pub fn asAnyBuffer(self: *Self) AnyBuffer {
+            return AnyBuffer.wrap(self);
         }
 
         /// Creates a new buffer object.

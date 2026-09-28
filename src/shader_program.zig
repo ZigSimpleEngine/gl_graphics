@@ -2,6 +2,9 @@
 const std = @import("std");
 /// OpenGL bindings import.
 const gl = @import("gl");
+/// Type-erased handle imports (for `asAnyProgram` forwarders).
+const handles = @import("handles.zig");
+const AnyProgram = handles.AnyProgram;
 
 /// Links a program from compiled shader ids.
 /// `fs_id` is a runtime optional `u32`, not an optional type parameter.
@@ -115,8 +118,8 @@ pub fn ShaderProgram(comptime vert: type, comptime frag: type) type {
         /// same ownership rules (record never owns the singleton).
         ///
         /// Returns: type-erased record.
-        pub fn asAnyProgram() @import("handles.zig").AnyProgram {
-            return @import("handles.zig").AnyProgram.wrap(@This());
+        pub fn asAnyProgram() AnyProgram {
+            return AnyProgram.wrap(@This());
         }
 
         /// Returns a vertex uniform editor bound to the singleton program.
@@ -209,8 +212,8 @@ pub fn VertexProgram(comptime vert: type) type {
         /// same ownership rules (record never owns the singleton).
         ///
         /// Returns: type-erased record.
-        pub fn asAnyProgram() @import("handles.zig").AnyProgram {
-            return @import("handles.zig").AnyProgram.wrapVertex(@This());
+        pub fn asAnyProgram() AnyProgram {
+            return AnyProgram.wrapVertex(@This());
         }
 
         /// Returns a vertex uniform editor bound to the singleton program.

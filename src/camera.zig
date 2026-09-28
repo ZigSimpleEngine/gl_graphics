@@ -1,7 +1,6 @@
 const std = @import("std");
 const gl = @import("gl");
 const math = @import("math");
-const Transform = @import("core").Transform;
 
 /// Function `Camera`.
 ///
@@ -21,9 +20,6 @@ pub fn Camera(comptime scalar_type_: type) type {
 
         /// Constant `Mat4`.
         pub const Mat4 = math.Mat(4, 4, Scalar);
-
-        /// Constant `TransformT`.
-        pub const TransformT = Transform(Scalar);
 
         /// Documentation.
         const Impl = struct {
@@ -117,15 +113,14 @@ pub fn Camera(comptime scalar_type_: type) type {
             }
         }
 
-        /// Recalculates the view matrix as inverse of the world matrix built
-        /// from the transform and an explicitly passed parent world matrix.
+        /// Recalculates the view matrix as inverse of the given global
+        /// camera world matrix.
         ///
         /// Parameters:
         /// - `m` — parameter `m`.
-        /// - `transform` — external transform value to compute view from.
-        /// - `parent_world` — world matrix of the transform's parent (`Mat4.identity()` if parentless).
-        fn recalcView(m: *Impl, transform: TransformT, parent_world: Mat4) void {
-            m.view = transform.toWorldMatrix(parent_world).inverse();
+        /// - `world` — global transform of the camera.
+        fn recalcView(m: *Impl, world: Mat4) void {
+            m.view = world.inverse();
         }
 
         /// Casts `f32` matrix to current scalar type.
@@ -157,11 +152,11 @@ pub fn Camera(comptime scalar_type_: type) type {
             const m = try allocator.create(Impl);
             m.* = .{};
             recalcProjection(m);
-            // view stays identity until use(transform) provides a transform
+            // view stays identity until use(world) provides a global transform
             return @ptrCast(m);
         }
 
-        /// Creates an instance with default transform (kept for compatibility, no transform allocation).
+        /// Creates an instance with default settings.
         ///
         /// Parameters:
         /// - `allocator` — parameter `allocator`.
@@ -291,15 +286,14 @@ pub fn Camera(comptime scalar_type_: type) type {
             gl.viewport.viewport(m.viewport_x, m.viewport_y, m.viewport_w, m.viewport_h);
         }
 
-        /// Activates the instance, updating view from external transform.
+        /// Activates the instance, updating view from the global camera transform.
         ///
         /// Parameters:
         /// - `self` — parameter `self`.
-        /// - `transform` — external transform value to compute view matrix from.
-        /// - `parent_world` — world matrix of the transform's parent (`Mat4.identity()` if parentless).
-        pub fn use(self: *Self, transform: TransformT, parent_world: Mat4) void {
+        /// - `transform` — global camera world matrix to compute view matrix from.
+        pub fn use(self: *Self, transform: Mat4) void {
             const m = self.impl();
-            recalcView(m, transform, parent_world);
+            recalcView(m, transform);
             self.applyViewport();
         }
 

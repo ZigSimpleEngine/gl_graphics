@@ -249,43 +249,92 @@ pub const UniformFieldDesc = struct {
     kind: UniformKind,
 };
 
-/// Builds uniform field descriptors for a uniform struct type.
-/// Descriptors point at static memory; no allocation happens. Call with
-/// `comptime` (all inputs are comptime-known).
+/// Compact per-field entry stored in the static name hash map.
+/// Duplicates `UniformFieldDesc` plus the declaration index (`field_id`).
+pub const UniformFieldRef = struct {
+    /// Declaration index (`field_id`).
+    id: u32,
+    /// `typeId` of the field type.
+    type_id: usize,
+    /// `@sizeOf` the field type.
+    size: usize,
+    /// `@offsetOf` the field within the uniform struct.
+    offset: usize,
+    /// Upload classification.
+    kind: UniformKind,
+};
+
+/// Static uniform field table for one uniform struct type.
+///
+/// Holds both the declaration-ordered slice (`fields`, `field_id` == index,
+/// for all id-based paths: validation, upload, cache rw) and the comptime
+/// static hash map (`by_name`, key is the field name) for name lookups.
+/// No allocation happens; all memory is static per `U`.
+pub const UniformFields = struct {
+    /// Per-field descriptors in declaration order.
+    fields: []const UniformFieldDesc,
+    /// Static hash map `field name -> descriptor + id`.
+    by_name: std.StaticStringMap(UniformFieldRef),
+
+    /// Resolves a field id by name with a type check.
+    /// Returns null when the field is missing or the type does not match.
+    pub fn getId(self: *const UniformFields, name: []const u8, comptime T: type) ?u32 {
+        const ref = self.by_name.get(name) orelse return null;
+        if (ref.type_id != typeId(T)) return null;
+        return ref.id;
+    }
+
+    /// Returns the full descriptor by name with a type check.
+    /// Returns null when the field is missing or the type does not match.
+    pub fn getDesc(self: *const UniformFields, name: []const u8, comptime T: type) ?UniformFieldDesc {
+        const ref = self.by_name.get(name) orelse return null;
+        if (ref.type_id != typeId(T)) return null;
+        if (ref.id >= self.fields.len) return null;
+        return self.fields[ref.id];
+    }
+};
+
+/// Builds a static uniform field table for a uniform struct type.
+/// Both the slice and the hash map point at static per-`U` memory;
+/// no allocation happens. Call with `comptime` (all inputs are comptime-known).
 /// Parameters:
 /// - `U`: uniform struct type.
 ///
-/// Returns: per-field descriptors in declaration order (`field_id` == index).
-pub fn uniformFields(comptime U: type) []const UniformFieldDesc {
+/// Returns: static table with declaration-ordered descriptors (`field_id` == index)
+/// plus a static `field name -> descriptor` hash map.
+pub fn uniformFields(comptime U: type) UniformFields {
     if (@typeInfo(U) != .@"struct") @compileError("uniformFields expects a struct, got " ++ @typeName(U));
-    var acc: []const UniformFieldDesc = &.{};
-    inline for (@typeInfo(U).@"struct".fields) |f| {
-        acc = acc ++ [_]UniformFieldDesc{.{
-            .name = f.name,
-            .type_id = typeId(f.type),
-            .size = @sizeOf(f.type),
-            .offset = @offsetOf(U, f.name),
-            .kind = uniformKindOf(f.type),
-        }};
-    }
-    return acc;
-}
-
-/// Resolves a uniform field id by name with a type check.
-/// Parameters:
-/// - fields: uniform field descriptors.
-/// - name: field name to find.
-/// - want_type_id: `typeId` of the expected field type.
-///
-/// Returns: field id, `FieldNotFound` or `FieldTypeMismatch`.
-pub fn uniformFieldIdByName(fields: []const UniformFieldDesc, name: []const u8, want_type_id: usize) ResourceError!u32 {
-    for (fields, 0..) |f, i| {
-        if (std.mem.eql(u8, f.name, name)) {
-            if (f.type_id != want_type_id) return error.FieldTypeMismatch;
-            return @intCast(i);
-        }
-    }
-    return error.FieldNotFound;
+    const S = struct {
+        const struct_fields = @typeInfo(U).@"struct".fields;
+        const fields_acc: []const UniformFieldDesc = blk: {
+            var acc: []const UniformFieldDesc = &.{};
+            for (struct_fields) |f| {
+                acc = acc ++ [_]UniformFieldDesc{.{
+                    .name = f.name,
+                    .type_id = typeId(f.type),
+                    .size = @sizeOf(f.type),
+                    .offset = @offsetOf(U, f.name),
+                    .kind = uniformKindOf(f.type),
+                }};
+            }
+            break :blk acc;
+        };
+        const kvs_arr: [struct_fields.len]struct { []const u8, UniformFieldRef } = blk: {
+            var arr: [struct_fields.len]struct { []const u8, UniformFieldRef } = undefined;
+            for (struct_fields, 0..) |f, i| {
+                arr[i] = .{ f.name, .{
+                    .id = @intCast(i),
+                    .type_id = typeId(f.type),
+                    .size = @sizeOf(f.type),
+                    .offset = @offsetOf(U, f.name),
+                    .kind = uniformKindOf(f.type),
+                } };
+            }
+            break :blk arr;
+        };
+        const map: std.StaticStringMap(UniformFieldRef) = std.StaticStringMap(UniformFieldRef).initComptime(kvs_arr);
+    };
+    return .{ .fields = S.fields_acc, .by_name = S.map };
 }
 
 /// Writes raw bytes into one field of a struct value by descriptor.
@@ -340,20 +389,21 @@ test "typeId unique per type" {
 
 test "uniform fields lookup and byte rw" {
     const U = struct { alpha: f32, count: i32 };
-    const fields = comptime uniformFields(U);
-    try std.testing.expectEqual(@as(usize, 2), fields.len);
-    const id = try uniformFieldIdByName(fields, "count", typeId(i32));
-    try std.testing.expectEqual(@as(u32, 1), id);
-    try std.testing.expectError(error.FieldNotFound, uniformFieldIdByName(fields, "missing", typeId(i32)));
-    try std.testing.expectError(error.FieldTypeMismatch, uniformFieldIdByName(fields, "count", typeId(f32)));
+    const table = comptime uniformFields(U);
+    try std.testing.expectEqual(@as(usize, 2), table.fields.len);
+    try std.testing.expectEqual(@as(u32, 1), table.getId("count", i32).?);
+    try std.testing.expect(table.getId("missing", i32) == null);
+    try std.testing.expect(table.getId("count", f32) == null);
+    try std.testing.expect(table.by_name.get("count").?.id == 1);
+    try std.testing.expect(table.getDesc("alpha", f32).?.size == @sizeOf(f32));
 
     var u = U{ .alpha = 0.5, .count = 3 };
     const raw: [4]u8 = @bitCast(@as(i32, 42));
-    try writeField(&u, fields[1], typeId(i32), &raw);
+    try writeField(&u, table.fields[1], typeId(i32), &raw);
     try std.testing.expectEqual(@as(i32, 42), u.count);
     var out: [4]u8 = undefined;
-    try readField(&u, fields[1], typeId(i32), &out);
+    try readField(&u, table.fields[1], typeId(i32), &out);
     try std.testing.expectEqualSlices(u8, &raw, &out);
-    try std.testing.expectError(error.SizeMismatch, writeField(&u, fields[1], typeId(i32), raw[0..2]));
-    try std.testing.expectError(error.FieldTypeMismatch, writeField(&u, fields[1], typeId(f32), &raw));
+    try std.testing.expectError(error.SizeMismatch, writeField(&u, table.fields[1], typeId(i32), raw[0..2]));
+    try std.testing.expectError(error.FieldTypeMismatch, writeField(&u, table.fields[1], typeId(f32), &raw));
 }

@@ -35,31 +35,19 @@ fn checkShaderOwner(comptime U: type, comptime param_name: []const u8) type {
     return Owner;
 }
 
-/// Resolves a uniform field id by name with a type check.
-/// Shared by the vertex and fragment accessors of both material kinds.
-/// Parameters:
-/// - U: explicit uniform struct type.
-/// - field_name: comptime field name to find.
-/// - F: comptime expected field type.
-///
-/// Returns: field id, `FieldNotFound` or `FieldTypeMismatch`.
-fn uniformFieldIdByName(comptime U: type, comptime field_name: []const u8, comptime F: type) gpu_meta.ResourceError!u32 {
-    return gpu_meta.uniformFieldIdByName(comptime gpu_meta.uniformFields(U), field_name, gpu_meta.typeId(F));
-}
-
 /// Writes one uniform field by id.
 /// Shared by the vertex and fragment setters of both material kinds.
 /// Parameters:
 /// - U: explicit uniform struct type.
 /// - uniform: pointer to the cached uniform value.
-/// - field_id: id from the matching `uniformFieldIdByName`.
+/// - field_id: id from the matching static hash map lookup (`UniformFields.getId`).
 /// - data: value whose type must match the field type.
 ///
 /// Returns: `UnknownFieldId` or `FieldTypeMismatch`/`SizeMismatch` on failure.
 fn writeUniformField(comptime U: type, uniform: *U, field_id: u32, data: anytype) gpu_meta.ResourceError!void {
-    const fields = comptime gpu_meta.uniformFields(U);
-    if (field_id >= fields.len) return error.UnknownFieldId;
-    try gpu_meta.writeField(uniform, fields[field_id], gpu_meta.typeId(@TypeOf(data)), std.mem.asBytes(&data));
+    const table = comptime gpu_meta.uniformFields(U);
+    if (field_id >= table.fields.len) return error.UnknownFieldId;
+    try gpu_meta.writeField(uniform, table.fields[field_id], gpu_meta.typeId(@TypeOf(data)), std.mem.asBytes(&data));
 }
 
 /// Reads one uniform field by id.
@@ -67,16 +55,16 @@ fn writeUniformField(comptime U: type, uniform: *U, field_id: u32, data: anytype
 /// Parameters:
 /// - U: explicit uniform struct type.
 /// - uniform: pointer to the cached uniform value.
-/// - field_id: id from the matching `uniformFieldIdByName`.
+/// - field_id: id from the matching static hash map lookup (`UniformFields.getId`).
 /// - T: comptime expected field type.
 ///
 /// Returns: field value copy, or `UnknownFieldId`/`FieldTypeMismatch` on failure.
 fn readUniformField(comptime U: type, uniform: *U, field_id: u32, comptime T: type) gpu_meta.ResourceError!T {
-    const fields = comptime gpu_meta.uniformFields(U);
-    if (field_id >= fields.len) return error.UnknownFieldId;
-    if (fields[field_id].type_id != gpu_meta.typeId(T)) return error.FieldTypeMismatch;
+    const table = comptime gpu_meta.uniformFields(U);
+    if (field_id >= table.fields.len) return error.UnknownFieldId;
+    if (table.fields[field_id].type_id != gpu_meta.typeId(T)) return error.FieldTypeMismatch;
     var out: T = undefined;
-    try gpu_meta.readField(uniform, fields[field_id], gpu_meta.typeId(T), std.mem.asBytes(&out));
+    try gpu_meta.readField(uniform, table.fields[field_id], gpu_meta.typeId(T), std.mem.asBytes(&out));
     return out;
 }
 
@@ -181,15 +169,15 @@ pub fn Material(
         /// Errors for name/id based uniform field access.
         pub const UniformFieldError = gpu_meta.ResourceError;
 
-        /// Resolves a vertex uniform field id by name with a type check.
+        /// Resolves a vertex uniform field id by name with a type check via static hash map.
         /// `field_id` is the field index inside `vert_uniform`.
         /// Parameters:
         /// - field_name: comptime field name to find.
         /// - F: comptime expected field type.
         ///
-        /// Returns: field id, `FieldNotFound` or `FieldTypeMismatch`.
-        pub fn getVertUniformFieldId(comptime field_name: []const u8, comptime F: type) UniformFieldError!u32 {
-            return uniformFieldIdByName(vert_uniform, field_name, F);
+        /// Returns: field id, or null when the field is missing or the type differs.
+        pub fn getVertUniformFieldId(comptime field_name: []const u8, comptime F: type) ?u32 {
+            return (comptime gpu_meta.uniformFields(vert_uniform)).getId(field_name, F);
         }
 
         /// Writes one vertex uniform field by id.
@@ -214,15 +202,15 @@ pub fn Material(
             return readUniformField(vert_uniform, &self.vertUniform, field_id, T);
         }
 
-        /// Resolves a fragment uniform field id by name with a type check.
+        /// Resolves a fragment uniform field id by name with a type check via static hash map.
         /// `field_id` is the field index inside `frag_uniform`.
         /// Parameters:
         /// - field_name: comptime field name to find.
         /// - F: comptime expected field type.
         ///
-        /// Returns: field id, `FieldNotFound` or `FieldTypeMismatch`.
-        pub fn getFragUniformFieldId(comptime field_name: []const u8, comptime F: type) UniformFieldError!u32 {
-            return uniformFieldIdByName(frag_uniform, field_name, F);
+        /// Returns: field id, or null when the field is missing or the type differs.
+        pub fn getFragUniformFieldId(comptime field_name: []const u8, comptime F: type) ?u32 {
+            return (comptime gpu_meta.uniformFields(frag_uniform)).getId(field_name, F);
         }
 
         /// Writes one fragment uniform field by id.
@@ -313,15 +301,15 @@ pub fn VertexMaterial(comptime vert_uniform: type, comptime vert_uniform_value: 
         /// Errors for name/id based uniform field access.
         pub const UniformFieldError = gpu_meta.ResourceError;
 
-        /// Resolves a vertex uniform field id by name with a type check.
+        /// Resolves a vertex uniform field id by name with a type check via static hash map.
         /// `field_id` is the field index inside `vert_uniform`.
         /// Parameters:
         /// - field_name: comptime field name to find.
         /// - F: comptime expected field type.
         ///
-        /// Returns: field id, `FieldNotFound` or `FieldTypeMismatch`.
-        pub fn getVertUniformFieldId(comptime field_name: []const u8, comptime F: type) UniformFieldError!u32 {
-            return uniformFieldIdByName(vert_uniform, field_name, F);
+        /// Returns: field id, or null when the field is missing or the type differs.
+        pub fn getVertUniformFieldId(comptime field_name: []const u8, comptime F: type) ?u32 {
+            return (comptime gpu_meta.uniformFields(vert_uniform)).getId(field_name, F);
         }
 
         /// Writes one vertex uniform field by id.
@@ -439,21 +427,21 @@ test "material from uniform types, defaults and uniqueness" {
     const other: M2 = .{};
     try std.testing.expectEqual(@as(f32, 9.0), other.vertUniform.uA);
 
-    const id_a = try M.getVertUniformFieldId("uA", f32);
+    const id_a = M.getVertUniformFieldId("uA", f32) orelse unreachable;
     try std.testing.expectEqual(@as(f32, 5.0), try self.getVertUniformData(id_a, f32));
     try self.setVertUniformData(id_a, @as(f32, 2.5));
     try std.testing.expectEqual(@as(f32, 2.5), self.vertUniform.uA);
 
-    const id_b = try M.getVertUniformFieldId("uB", i32);
+    const id_b = M.getVertUniformFieldId("uB", i32) orelse unreachable;
     try self.setVertUniformData(id_b, @as(i32, -4));
     try std.testing.expectEqual(@as(i32, -4), try self.getVertUniformData(id_b, i32));
 
-    const id_c = try M.getFragUniformFieldId("uC", u32);
+    const id_c = M.getFragUniformFieldId("uC", u32) orelse unreachable;
     try self.setFragUniformData(id_c, @as(u32, 9));
     try std.testing.expectEqual(@as(u32, 9), try self.getFragUniformData(id_c, u32));
 
-    try std.testing.expectError(error.FieldNotFound, M.getVertUniformFieldId("nope", f32));
-    try std.testing.expectError(error.FieldTypeMismatch, M.getVertUniformFieldId("uA", i32));
+    try std.testing.expect(M.getVertUniformFieldId("nope", f32) == null);
+    try std.testing.expect(M.getVertUniformFieldId("uA", i32) == null);
     try std.testing.expectError(error.UnknownFieldId, self.getVertUniformData(99, f32));
     try std.testing.expectError(error.FieldTypeMismatch, self.getVertUniformData(id_a, i32));
     try std.testing.expectError(error.UnknownFieldId, self.setFragUniformData(7, @as(u32, 1)));
@@ -467,12 +455,12 @@ test "vertex material from uniform type and default" {
     try std.testing.expectEqual(@as(f32, 0.5), vonly.vertUniform.uA);
 
     var self: MV = .{};
-    const id_a = try MV.getVertUniformFieldId("uA", f32);
+    const id_a = MV.getVertUniformFieldId("uA", f32) orelse unreachable;
     try std.testing.expectEqual(@as(f32, 0.5), try self.getVertUniformData(id_a, f32));
     try self.setVertUniformData(id_a, @as(f32, 2.5));
     try std.testing.expectEqual(@as(f32, 2.5), self.vertUniform.uA);
 
-    try std.testing.expectError(error.FieldNotFound, MV.getVertUniformFieldId("nope", f32));
+    try std.testing.expect(MV.getVertUniformFieldId("nope", f32) == null);
     try std.testing.expectError(error.UnknownFieldId, self.getVertUniformData(99, f32));
 }
 
@@ -485,13 +473,10 @@ test "asAnyMaterial roundtrips through AnyMaterial without GL" {
     try std.testing.expectEqualStrings(@typeName(M), rec.material_name);
 
     // CPU-side cache access only: no `use()` (that would link the GL program).
-    const tid_f32 = gpu_meta.typeId(f32);
-    const id_a = try rec.getVertUniformFieldId("uA", tid_f32);
-    var two: f32 = 2.0;
-    try rec.setVertUniformData(id_a, tid_f32, std.mem.asBytes(&two));
-    var got: f32 = 0;
-    try rec.getVertUniformData(id_a, tid_f32, std.mem.asBytes(&got));
-    try std.testing.expectEqual(@as(f32, 2.0), got);
+    const id_a = rec.getVertUniformFieldId("uA", f32) orelse unreachable;
+    const two: f32 = 2.0;
+    try rec.setVertUniformData(id_a, two);
+    try std.testing.expectEqual(@as(f32, 2.0), try rec.getVertUniformData(id_a, f32));
     try std.testing.expectEqual(@as(f32, 2.0), m.vertUniform.uA);
 
     const MV = VertexMaterial(DummyVert.Uniform, .{ .uA = 0.5, .uB = -1 });

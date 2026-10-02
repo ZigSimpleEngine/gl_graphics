@@ -39,61 +39,64 @@ pub const VertexDescriptor = struct {
     /// Returns: allocated Zig source string.
     pub fn getCode(ptr: *anyopaque, init: std.process.Init, data: EmbedDescriptor.Data) anyerror![]u8 {
         const self: *VertexDescriptor = @ptrCast(@alignCast(ptr));
-        const gpa = init.gpa;
+        const allocator = init.gpa;
         const io = init.io;
         const node = data.node;
         const depth = data.depth;
 
-        const prefix = try text_utils.repeat(gpa, " ", depth * self.spaces_per_depth);
-        defer if (prefix) |p| gpa.free(p);
+        const prefix = try text_utils.repeat(allocator, " ", depth * self.spaces_per_depth);
+        defer if (prefix) |p| allocator.free(p);
 
-        const path = try node.createPath(gpa);
-        defer gpa.free(path);
+        const path = try node.createPath(allocator);
+        defer allocator.free(path);
 
         const identifier_raw = node.name orelse return error.MissingName;
-        const var_name = try text_utils.filenameToIdentifier(gpa, identifier_raw);
-        defer gpa.free(var_name);
+        const var_name = try text_utils.filenameToIdentifier(allocator, identifier_raw);
+        defer allocator.free(var_name);
 
-        const raw_original = try common.readNodeFile(gpa, io, path) orelse try gpa.dupe(u8, "");
-        defer gpa.free(raw_original);
+        const raw_original = try common.readNodeFile(allocator, io, path) orelse try allocator.dupe(u8, "");
+        defer allocator.free(raw_original);
         const raw_main = if (std.mem.startsWith(u8, raw_original, "\xEF\xBB\xBF")) raw_original[3..] else raw_original;
 
         // Maps a GLSL struct name to the top-level identifier (.glsl file base
         // name) that owns its single definition, e.g. "Light" -> "common".
-        var link_map = std.StringHashMap([]u8).init(gpa);
+        var link_map = std.StringHashMap([]u8).init(allocator);
         defer link_map.deinit();
 
-        var visited = std.StringHashMap(void).init(gpa);
+        var visited = std.StringHashMap(void).init(allocator);
         defer visited.deinit();
 
         // Assemble the actual GLSL source: includes are inlined in place so
         // declaration order (e.g. precision hints before structs) is kept.
         var combined = std.ArrayList(u8).empty;
-        defer combined.deinit(gpa);
-        try common.resolveShaderIncludes(gpa, io, &combined, raw_main, path, &visited, &link_map);
-        const combined_slice = try combined.toOwnedSlice(gpa);
-        defer gpa.free(combined_slice);
+        defer combined.deinit(allocator);
+        try common.resolveShaderIncludes(allocator, io, &combined, raw_main, path, &visited, &link_map);
+        const combined_slice = try combined.toOwnedSlice(allocator);
+        defer allocator.free(combined_slice);
 
-        const no_comments = try common.stripComments(gpa, combined_slice);
-        defer gpa.free(no_comments);
+        const no_comments = try common.stripComments(allocator, combined_slice);
+        defer allocator.free(no_comments);
 
-        const structs = try common.parseStructs(gpa, no_comments);
-        defer common.freeStructs(gpa, structs);
+        const structs = try common.parseStructs(allocator, no_comments);
+        defer common.freeStructs(allocator, structs);
 
-        const main_no_comments = try common.stripComments(gpa, raw_main);
-        defer gpa.free(main_no_comments);
-        const stripped_for_ins = try common.stripLayouts(gpa, main_no_comments);
-        defer gpa.free(stripped_for_ins);
-        const ins = try common.parseIns(gpa, stripped_for_ins);
-        defer common.freeFields(gpa, ins);
+        const main_no_comments = try common.stripComments(allocator, raw_main);
+        defer allocator.free(main_no_comments);
+        const stripped_for_ins = try common.stripLayouts(allocator, main_no_comments);
+        defer allocator.free(stripped_for_ins);
+        const ins = try common.parseIns(allocator, stripped_for_ins);
+        defer common.freeFields(allocator, ins);
 
-        const uniforms = try common.parseUniforms(gpa, no_comments);
-        defer common.freeUniforms(gpa, uniforms);
+        const uniforms = try common.parseUniforms(allocator, no_comments);
+        defer common.freeUniforms(allocator, uniforms);
+
+        const enum_defs = try common.parseEnumDefines(allocator, combined_slice);
+        defer common.freeEnumDefines(allocator, enum_defs);
 
         var inner = std.ArrayList(u8).empty;
-        defer inner.deinit(gpa);
+        defer inner.deinit(allocator);
 
-        var struct_map = std.StringHashMap(void).init(gpa);
+        var struct_map = std.StringHashMap(void).init(allocator);
         defer struct_map.deinit();
         for (structs) |s| try struct_map.put(s.name, {});
 
@@ -102,109 +105,109 @@ pub const VertexDescriptor = struct {
                 if (link_map.get(s.name)) |ident| {
                     // Link to the single definition generated from the .glsl
                     // include instead of duplicating it here.
-                    try inner.appendSlice(gpa, "    pub const ");
-                    try inner.appendSlice(gpa, s.name);
-                    const link_line = try std.fmt.allocPrint(gpa, " = {s}.{s};\n", .{ ident, s.name });
-                    defer gpa.free(link_line);
-                    try inner.appendSlice(gpa, link_line);
+                    try inner.appendSlice(allocator, "    pub const ");
+                    try inner.appendSlice(allocator, s.name);
+                    const link_line = try std.fmt.allocPrint(allocator, " = {s}.{s};\n", .{ ident, s.name });
+                    defer allocator.free(link_line);
+                    try inner.appendSlice(allocator, link_line);
                     continue;
                 }
-                try inner.appendSlice(gpa, "    pub const ");
-                try inner.appendSlice(gpa, s.name);
-                try inner.appendSlice(gpa, " = struct {\n");
+                try inner.appendSlice(allocator, "    pub const ");
+                try inner.appendSlice(allocator, s.name);
+                try inner.appendSlice(allocator, " = struct {\n");
                 for (s.fields) |f| {
-                    const zig_type = try common.mapGLSLTypeToZig(gpa, f.typ);
-                    defer gpa.free(zig_type);
-                    try inner.appendSlice(gpa, "        ");
-                    try inner.appendSlice(gpa, f.name);
-                    try inner.appendSlice(gpa, ": ");
+                    const zig_type = try common.mapGLSLTypeToZig(allocator, f.typ);
+                    defer allocator.free(zig_type);
+                    try inner.appendSlice(allocator, "        ");
+                    try inner.appendSlice(allocator, f.name);
+                    try inner.appendSlice(allocator, ": ");
                     if (f.is_array) {
                         if (f.array_len) |len| {
-                            const tmp = try std.fmt.allocPrint(gpa, "[{d}]{s}", .{ len, zig_type });
-                            defer gpa.free(tmp);
-                            try inner.appendSlice(gpa, tmp);
+                            const tmp = try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
+                            defer allocator.free(tmp);
+                            try inner.appendSlice(allocator, tmp);
                         } else {
-                            const tmp = try std.fmt.allocPrint(gpa, "[]{s}", .{zig_type});
-                            defer gpa.free(tmp);
-                            try inner.appendSlice(gpa, tmp);
+                            const tmp = try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
+                            defer allocator.free(tmp);
+                            try inner.appendSlice(allocator, tmp);
                         }
                     } else {
-                        try inner.appendSlice(gpa, zig_type);
+                        try inner.appendSlice(allocator, zig_type);
                     }
-                    try inner.appendSlice(gpa, ",\n");
+                    try inner.appendSlice(allocator, ",\n");
                 }
-                try inner.appendSlice(gpa, "    };\n");
+                try inner.appendSlice(allocator, "    };\n");
             }
-            try inner.appendSlice(gpa, "\n");
+            try inner.appendSlice(allocator, "\n");
         }
 
         for (uniforms) |u| {
             if (u.kind == .block) {
                 const block_type = u.glsl_type;
                 if (!struct_map.contains(block_type)) {
-                    try inner.appendSlice(gpa, "    pub const ");
-                    try inner.appendSlice(gpa, block_type);
-                    try inner.appendSlice(gpa, " = struct {\n");
+                    try inner.appendSlice(allocator, "    pub const ");
+                    try inner.appendSlice(allocator, block_type);
+                    try inner.appendSlice(allocator, " = struct {\n");
                     if (u.block_fields) |fields| {
                         for (fields) |f| {
-                            const zig_type = try common.mapGLSLTypeToZig(gpa, f.typ);
-                            defer gpa.free(zig_type);
-                            try inner.appendSlice(gpa, "        ");
-                            try inner.appendSlice(gpa, f.name);
-                            try inner.appendSlice(gpa, ": ");
+                            const zig_type = try common.mapGLSLTypeToZig(allocator, f.typ);
+                            defer allocator.free(zig_type);
+                            try inner.appendSlice(allocator, "        ");
+                            try inner.appendSlice(allocator, f.name);
+                            try inner.appendSlice(allocator, ": ");
                             if (f.is_array) {
                                 if (f.array_len) |len| {
-                                    const tmp = try std.fmt.allocPrint(gpa, "[{d}]{s}", .{ len, zig_type });
-                                    defer gpa.free(tmp);
-                                    try inner.appendSlice(gpa, tmp);
+                                    const tmp = try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
+                                    defer allocator.free(tmp);
+                                    try inner.appendSlice(allocator, tmp);
                                 } else {
-                                    const tmp = try std.fmt.allocPrint(gpa, "[]{s}", .{zig_type});
-                                    defer gpa.free(tmp);
-                                    try inner.appendSlice(gpa, tmp);
+                                    const tmp = try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
+                                    defer allocator.free(tmp);
+                                    try inner.appendSlice(allocator, tmp);
                                 }
                             } else {
-                                try inner.appendSlice(gpa, zig_type);
+                                try inner.appendSlice(allocator, zig_type);
                             }
-                            try inner.appendSlice(gpa, ",\n");
+                            try inner.appendSlice(allocator, ",\n");
                         }
                     }
-                    try inner.appendSlice(gpa, "    };\n");
+                    try inner.appendSlice(allocator, "    };\n");
                 }
             }
         }
-        if (structs.len > 0 or blk_has(uniforms)) try inner.appendSlice(gpa, "\n");
+        if (structs.len > 0 or blk_has(uniforms)) try inner.appendSlice(allocator, "\n");
 
         if (ins.len == 0) {
-            try inner.appendSlice(gpa, "    pub const Vertex = struct {\n");
-            try inner.appendSlice(gpa, "        pub const SOA = struct {};\n");
-            try inner.appendSlice(gpa, "    };\n");
+            try inner.appendSlice(allocator, "    pub const Vertex = struct {\n");
+            try inner.appendSlice(allocator, "        pub const SOA = struct {};\n");
+            try inner.appendSlice(allocator, "    };\n");
         } else {
-            try inner.appendSlice(gpa, "    pub const Vertex = struct {\n");
+            try inner.appendSlice(allocator, "    pub const Vertex = struct {\n");
             for (ins) |f| {
-                const zig_type = try common.mapGLSLTypeToZig(gpa, f.typ);
-                defer gpa.free(zig_type);
-                try inner.appendSlice(gpa, "        ");
-                try inner.appendSlice(gpa, f.name);
-                try inner.appendSlice(gpa, ": ");
-                try inner.appendSlice(gpa, zig_type);
-                try inner.appendSlice(gpa, ",\n");
+                const zig_type = try common.mapGLSLTypeToZig(allocator, f.typ);
+                defer allocator.free(zig_type);
+                try inner.appendSlice(allocator, "        ");
+                try inner.appendSlice(allocator, f.name);
+                try inner.appendSlice(allocator, ": ");
+                try inner.appendSlice(allocator, zig_type);
+                try inner.appendSlice(allocator, ",\n");
             }
             // SOA struct of arrays: same fields but as slices
-            try inner.appendSlice(gpa, "\n");
-            try inner.appendSlice(gpa, "        pub const SOA = struct {\n");
+            try inner.appendSlice(allocator, "\n");
+            try inner.appendSlice(allocator, "        pub const SOA = struct {\n");
             for (ins) |f| {
-                const zig_type = try common.mapGLSLTypeToZig(gpa, f.typ);
-                defer gpa.free(zig_type);
-                try inner.appendSlice(gpa, "            ");
-                try inner.appendSlice(gpa, f.name);
-                try inner.appendSlice(gpa, ": []const ");
-                try inner.appendSlice(gpa, zig_type);
-                try inner.appendSlice(gpa, ",\n");
+                const zig_type = try common.mapGLSLTypeToZig(allocator, f.typ);
+                defer allocator.free(zig_type);
+                try inner.appendSlice(allocator, "            ");
+                try inner.appendSlice(allocator, f.name);
+                try inner.appendSlice(allocator, ": []const ");
+                try inner.appendSlice(allocator, zig_type);
+                try inner.appendSlice(allocator, ",\n");
             }
-            try inner.appendSlice(gpa, "        };\n");
-            try inner.appendSlice(gpa, "    };\n");
+            try inner.appendSlice(allocator, "        };\n");
+            try inner.appendSlice(allocator, "    };\n");
         }
-        try inner.appendSlice(gpa, "\n");
+        try inner.appendSlice(allocator, "\n");
 
         // Back-reference for `Material`: the Uniform struct is emitted as a
         // sibling top-level decl so `Owner` can forward-reference the shader
@@ -215,183 +218,171 @@ pub const VertexDescriptor = struct {
             if (std.mem.eql(u8, u.name, "Owner")) return error.ReservedUniformName;
         }
         var uniform_outer = std.ArrayList(u8).empty;
-        defer uniform_outer.deinit(gpa);
-        const uniform_type_name = try std.fmt.allocPrint(gpa, "{s}_Uniform", .{var_name});
-        defer gpa.free(uniform_type_name);
-        try uniform_outer.appendSlice(gpa, "const ");
-        try uniform_outer.appendSlice(gpa, uniform_type_name);
-        try uniform_outer.appendSlice(gpa, " = struct {\n");
-        const owner_line = try std.fmt.allocPrint(gpa, "    pub const Owner = {s};\n", .{var_name});
-        defer gpa.free(owner_line);
-        try uniform_outer.appendSlice(gpa, owner_line);
+        defer uniform_outer.deinit(allocator);
+        const uniform_type_name = try std.fmt.allocPrint(allocator, "{s}_Uniform", .{var_name});
+        defer allocator.free(uniform_type_name);
+        try uniform_outer.appendSlice(allocator, "const ");
+        try uniform_outer.appendSlice(allocator, uniform_type_name);
+        try uniform_outer.appendSlice(allocator, " = struct {\n");
+        const owner_line = try std.fmt.allocPrint(allocator, "    pub const Owner = {s};\n", .{var_name});
+        defer allocator.free(owner_line);
+        try uniform_outer.appendSlice(allocator, owner_line);
         for (uniforms) |u| {
             const zig_type_raw: []u8 = blk: {
                 if (u.kind == .block) {
-                    const inner_t = try common.mapGLSLTypeToZig(gpa, u.glsl_type);
-                    defer gpa.free(inner_t);
-                    break :blk try std.fmt.allocPrint(gpa, "*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
+                    const inner_t = try common.mapGLSLTypeToZig(allocator, u.glsl_type);
+                    defer allocator.free(inner_t);
+                    break :blk try std.fmt.allocPrint(allocator, "*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
                 } else if (u.is_sampler) {
-                    break :blk try gpa.dupe(u8, "*const @import(\"gl_graphics\").Texture");
+                    break :blk try allocator.dupe(u8, "*const @import(\"gl_graphics\").Texture");
                 } else {
                     if (struct_map.contains(u.glsl_type)) {
-                        break :blk try gpa.dupe(u8, u.glsl_type);
+                        break :blk try allocator.dupe(u8, u.glsl_type);
                     } else {
-                        break :blk try common.mapGLSLTypeToZig(gpa, u.glsl_type);
+                        break :blk try common.mapGLSLTypeToZig(allocator, u.glsl_type);
                     }
                 }
             };
-            defer gpa.free(zig_type_raw);
-            try uniform_outer.appendSlice(gpa, "    ");
-            try uniform_outer.appendSlice(gpa, u.name);
-            try uniform_outer.appendSlice(gpa, ": ");
-            try uniform_outer.appendSlice(gpa, zig_type_raw);
-            try uniform_outer.appendSlice(gpa, ",\n");
+            defer allocator.free(zig_type_raw);
+            try uniform_outer.appendSlice(allocator, "    ");
+            try uniform_outer.appendSlice(allocator, u.name);
+            try uniform_outer.appendSlice(allocator, ": ");
+            try uniform_outer.appendSlice(allocator, zig_type_raw);
+            try uniform_outer.appendSlice(allocator, ",\n");
         }
-        try uniform_outer.appendSlice(gpa, "};\n");
-        try inner.appendSlice(gpa, "    pub const Uniform = ");
-        try inner.appendSlice(gpa, uniform_type_name);
-        try inner.appendSlice(gpa, ";\n");
-        try inner.appendSlice(gpa, "\n");
+        try uniform_outer.appendSlice(allocator, "};\n");
+        try inner.appendSlice(allocator, "    pub const Uniform = ");
+        try inner.appendSlice(allocator, uniform_type_name);
+        try inner.appendSlice(allocator, ";\n");
+        try inner.appendSlice(allocator, "\n");
 
         if (uniforms.len == 0) {
-            try inner.appendSlice(gpa, "    pub const IdCache = struct {};\n");
+            try inner.appendSlice(allocator, "    pub const IdCache = struct {};\n");
         } else {
-            try inner.appendSlice(gpa, "    pub const IdCache = struct {\n");
+            try inner.appendSlice(allocator, "    pub const IdCache = struct {\n");
             for (uniforms) |u| {
-                try inner.appendSlice(gpa, "        ");
-                try inner.appendSlice(gpa, u.name);
-                try inner.appendSlice(gpa, ": i32,\n");
+                try inner.appendSlice(allocator, "        ");
+                try inner.appendSlice(allocator, u.name);
+                try inner.appendSlice(allocator, ": i32,\n");
             }
-            try inner.appendSlice(gpa, "    };\n");
+            try inner.appendSlice(allocator, "    };\n");
         }
-        try inner.appendSlice(gpa, "\n");
+        try inner.appendSlice(allocator, "\n");
 
-        try inner.appendSlice(gpa, "    pub var id: u32 = 0;\n");
-        if (uniforms.len == 0) {
-            try inner.appendSlice(gpa, "    pub var id_cache: IdCache = .{};\n");
-        } else {
-            try inner.appendSlice(gpa, "    pub var id_cache: IdCache = .{\n");
-            for (uniforms) |u| {
-                try inner.appendSlice(gpa, "        .");
-                try inner.appendSlice(gpa, u.name);
-                try inner.appendSlice(gpa, " = -1,\n");
-            }
-            try inner.appendSlice(gpa, "    };\n");
-        }
-        try inner.appendSlice(gpa, "    var _initialized: bool = false;\n\n");
+        try common.appendEnumDefinesCode(allocator, &inner, enum_defs, combined_slice);
+        try inner.appendSlice(allocator, "    var variants: @import(\"std\").AutoHashMapUnmanaged(EnumDefines, u32) = .empty;\n\n");
 
-        try inner.appendSlice(gpa, "    pub const BufferBlocks = struct {\n");
+        try inner.appendSlice(allocator, "    pub const BufferBlocks = struct {\n");
         var bind_point: usize = 0;
         for (uniforms) |u| {
             if (u.kind != .block) continue;
-            try inner.appendSlice(gpa, "        pub const ");
-            try inner.appendSlice(gpa, u.name);
-            try inner.appendSlice(gpa, ": struct { name: [:0]const u8, point: u32 } = .{ .name = \"");
-            try inner.appendSlice(gpa, u.glsl_type);
-            try inner.appendSlice(gpa, "\", .point = ");
-            const bp = try std.fmt.allocPrint(gpa, "{d}", .{bind_point});
-            defer gpa.free(bp);
-            try inner.appendSlice(gpa, bp);
-            try inner.appendSlice(gpa, " };\n");
+            try inner.appendSlice(allocator, "        pub const ");
+            try inner.appendSlice(allocator, u.name);
+            try inner.appendSlice(allocator, ": struct { name: [:0]const u8, point: u32 } = .{ .name = \"");
+            try inner.appendSlice(allocator, u.glsl_type);
+            try inner.appendSlice(allocator, "\", .point = ");
+            const bp = try std.fmt.allocPrint(allocator, "{d}", .{bind_point});
+            defer allocator.free(bp);
+            try inner.appendSlice(allocator, bp);
+            try inner.appendSlice(allocator, " };\n");
             bind_point += 1;
         }
-        try inner.appendSlice(gpa, "    };\n\n");
+        try inner.appendSlice(allocator, "    };\n\n");
 
-        try inner.appendSlice(gpa, "    pub const Editor = struct {\n");
-        try inner.appendSlice(gpa, "        _program: u32,\n");
-        try inner.appendSlice(gpa, "        _pending: Uniform = undefined,\n");
+        try inner.appendSlice(allocator, "    pub const Editor = struct {\n");
+        try inner.appendSlice(allocator, "        _program: u32,\n");
+        try inner.appendSlice(allocator, "        _pending: Uniform = undefined,\n");
         if (uniforms.len == 0) {
-            try inner.appendSlice(gpa, "        _dirty: struct {} = .{},\n");
+            try inner.appendSlice(allocator, "        _dirty: struct {} = .{},\n");
         } else {
-            try inner.appendSlice(gpa, "        _dirty: struct {\n");
+            try inner.appendSlice(allocator, "        _dirty: struct {\n");
             for (uniforms) |u| {
-                try inner.appendSlice(gpa, "            ");
-                try inner.appendSlice(gpa, u.name);
-                try inner.appendSlice(gpa, ": bool = false,\n");
+                try inner.appendSlice(allocator, "            ");
+                try inner.appendSlice(allocator, u.name);
+                try inner.appendSlice(allocator, ": bool = false,\n");
             }
-            try inner.appendSlice(gpa, "        } = .{},\n");
+            try inner.appendSlice(allocator, "        } = .{},\n");
         }
-        try inner.appendSlice(gpa, "        _set_all: bool = false,\n\n");
-        try inner.appendSlice(gpa, "        pub fn init(program: u32) Editor { return .{ ._program = program }; }\n");
-        try inner.appendSlice(gpa, "        pub fn setUniform(self: *const Editor, uniform: Uniform) *const Editor { @constCast(self)._pending = uniform; @constCast(self)._set_all = true; return @constCast(self); }\n");
+        try inner.appendSlice(allocator, "        _set_all: bool = false,\n\n");
+        try inner.appendSlice(allocator, "        pub fn init(program: u32) Editor { return .{ ._program = program }; }\n");
+        try inner.appendSlice(allocator, "        pub fn setUniform(self: *const Editor, uniform: Uniform) *const Editor { @constCast(self)._pending = uniform; @constCast(self)._set_all = true; return @constCast(self); }\n");
         for (uniforms) |u| {
             const zig_param_type: []u8 = blk: {
                 if (u.kind == .block) {
-                    const inner_t = try common.mapGLSLTypeToZig(gpa, u.glsl_type);
-                    defer gpa.free(inner_t);
-                    break :blk try std.fmt.allocPrint(gpa, "*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
+                    const inner_t = try common.mapGLSLTypeToZig(allocator, u.glsl_type);
+                    defer allocator.free(inner_t);
+                    break :blk try std.fmt.allocPrint(allocator, "*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
                 } else if (u.is_sampler) {
-                    break :blk try gpa.dupe(u8, "*const @import(\"gl_graphics\").Texture");
+                    break :blk try allocator.dupe(u8, "*const @import(\"gl_graphics\").Texture");
                 } else {
                     if (struct_map.contains(u.glsl_type)) {
-                        break :blk try gpa.dupe(u8, u.glsl_type);
+                        break :blk try allocator.dupe(u8, u.glsl_type);
                     } else {
-                        break :blk try common.mapGLSLTypeToZig(gpa, u.glsl_type);
+                        break :blk try common.mapGLSLTypeToZig(allocator, u.glsl_type);
                     }
                 }
             };
-            defer gpa.free(zig_param_type);
-            const method_name = try std.fmt.allocPrint(gpa, "        pub fn set_{s}(self: *const Editor, value: {s}) *const Editor {{ @constCast(self)._pending.{s} = value; @constCast(self)._dirty.{s} = true; return @constCast(self); }}\n", .{ u.name, zig_param_type, u.name, u.name });
-            defer gpa.free(method_name);
-            try inner.appendSlice(gpa, method_name);
+            defer allocator.free(zig_param_type);
+            const method_name = try std.fmt.allocPrint(allocator, "        pub fn set_{s}(self: *const Editor, value: {s}) *const Editor {{ @constCast(self)._pending.{s} = value; @constCast(self)._dirty.{s} = true; return @constCast(self); }}\n", .{ u.name, zig_param_type, u.name, u.name });
+            defer allocator.free(method_name);
+            try inner.appendSlice(allocator, method_name);
         }
-        try inner.appendSlice(gpa, "\n");
-        try inner.appendSlice(gpa, "        pub fn apply(self: *const Editor) void {\n");
-        try inner.appendSlice(gpa, "            const mut = @constCast(self);\n");
-        try inner.appendSlice(gpa, "            @import(\"gl_graphics\").applyUniforms(Uniform, BufferBlocks, mut._program, mut._pending, mut._set_all, &mut._dirty);\n");
-        try inner.appendSlice(gpa, "        }\n");
-        try inner.appendSlice(gpa, "    };\n\n");
+        try inner.appendSlice(allocator, "\n");
+        try inner.appendSlice(allocator, "        pub fn apply(self: *const Editor) void {\n");
+        try inner.appendSlice(allocator, "            const mut = @constCast(self);\n");
+        try inner.appendSlice(allocator, "            @import(\"gl_graphics\").applyUniforms(Uniform, BufferBlocks, mut._program, mut._pending, mut._set_all, &mut._dirty);\n");
+        try inner.appendSlice(allocator, "        }\n");
+        try inner.appendSlice(allocator, "    };\n\n");
 
-        try inner.appendSlice(gpa, "    pub fn instance() u32 {\n");
-        try inner.appendSlice(gpa, "        if (_initialized and id != 0) return id;\n");
-        // Inline GLSL with `#include` resolved at generation time.
-        try inner.appendSlice(gpa, "        const src = ");
-        var src_literal = std.ArrayList(u8).empty;
-        defer src_literal.deinit(gpa);
-        try src_literal.append(gpa, '"');
-        for (combined_slice) |ch| {
-            switch (ch) {
-                '\\' => try src_literal.appendSlice(gpa, "\\\\"),
-                '"' => try src_literal.appendSlice(gpa, "\\\""),
-                '\n' => try src_literal.appendSlice(gpa, "\\n"),
-                '\r' => {},
-                else => try src_literal.append(gpa, ch),
+        try inner.appendSlice(allocator, "    pub fn instance(allocator: @import(\"std\").mem.Allocator, defines: EnumDefines) !u32 {\n");
+        try inner.appendSlice(allocator, "        if (variants.get(defines)) |sid| return sid;\n");
+        if (enum_defs.len == 0) {
+            try inner.appendSlice(allocator, "        const src = template_src;\n");
+        } else {
+            try inner.appendSlice(allocator, "        const texts = [_][]const u8{\n");
+            for (enum_defs) |d| {
+                const tline = try std.fmt.allocPrint(allocator, "            defines.{s}.text(),\n", .{d.field});
+                defer allocator.free(tline);
+                try inner.appendSlice(allocator, tline);
             }
+            try inner.appendSlice(allocator, "        };\n");
+            try inner.appendSlice(allocator, "        const src = try @import(\"gl_graphics\").buildVariantSrc(allocator, template_src, &define_slots, &texts);\n");
+            try inner.appendSlice(allocator, "        defer allocator.free(src);\n");
         }
-        try src_literal.append(gpa, '"');
-        try inner.appendSlice(gpa, src_literal.items);
-        try inner.appendSlice(gpa, ";\n");
-        try inner.appendSlice(gpa, "        id = @import(\"gl_graphics\").compileShaderSource(.vertex_shader, src);\n");
-        try inner.appendSlice(gpa, "        _initialized = true;\n");
-        try inner.appendSlice(gpa, "        return id;\n");
-        try inner.appendSlice(gpa, "    }\n\n");
+        try inner.appendSlice(allocator, "        const sid = @import(\"gl_graphics\").compileShaderSource(.vertex_shader, src);\n");
+        try inner.appendSlice(allocator, "        try variants.put(allocator, defines, sid);\n");
+        try inner.appendSlice(allocator, "        return sid;\n");
+        try inner.appendSlice(allocator, "    }\n\n");
 
-        try inner.appendSlice(gpa, "    pub fn dispose() void {\n");
-        try inner.appendSlice(gpa, "        @import(\"gl_graphics\").disposeShader(&id, &_initialized);\n");
-        try inner.appendSlice(gpa, "    }\n\n");
+        try inner.appendSlice(allocator, "    pub fn destroy(allocator: @import(\"std\").mem.Allocator) void {\n");
+        try inner.appendSlice(allocator, "        var it = variants.iterator();\n");
+        try inner.appendSlice(allocator, "        while (it.next()) |e| @import(\"gl_graphics\").gl.shaders.delete(e.value_ptr.*);\n");
+        try inner.appendSlice(allocator, "        variants.deinit(allocator);\n");
+        try inner.appendSlice(allocator, "        variants = .empty;\n");
+        try inner.appendSlice(allocator, "    }\n\n");
 
-        try inner.appendSlice(gpa, "    pub fn edit(program: u32) Editor { return Editor.init(program); }\n");
+        try inner.appendSlice(allocator, "    pub fn edit(program: u32) Editor { return Editor.init(program); }\n");
 
-        const inner_slice = try inner.toOwnedSlice(gpa);
-        defer gpa.free(inner_slice);
+        const inner_slice = try inner.toOwnedSlice(allocator);
+        defer allocator.free(inner_slice);
 
         // Free include registry data (keys and identifiers owned by the maps).
         {
             var it = link_map.iterator();
             while (it.next()) |e| {
-                gpa.free(e.key_ptr.*);
-                gpa.free(e.value_ptr.*);
+                allocator.free(e.key_ptr.*);
+                allocator.free(e.value_ptr.*);
             }
             var vit = visited.iterator();
             while (vit.next()) |e| {
-                gpa.free(e.key_ptr.*);
+                allocator.free(e.key_ptr.*);
             }
         }
 
-        const uniform_outer_slice = try uniform_outer.toOwnedSlice(gpa);
-        defer gpa.free(uniform_outer_slice);
+        const uniform_outer_slice = try uniform_outer.toOwnedSlice(allocator);
+        defer allocator.free(uniform_outer_slice);
 
-        const outer = try std.fmt.allocPrint(gpa,
+        const outer = try std.fmt.allocPrint(allocator,
             "{s}{s}\n{s}pub const {s} = struct {{\n{s}{s}{s}}};\n",
             .{ prefix orelse "", uniform_outer_slice, prefix orelse "", var_name, inner_slice, if (inner_slice.len > 0 and inner_slice[inner_slice.len - 1] == '\n') "" else "\n", prefix orelse "" });
         return outer;

@@ -670,7 +670,7 @@ pub fn resolveIncludePath(allocator: std.mem.Allocator, baseFilePath: []const u8
 /// declared in `.glsl` files into `link_map` (struct name -> owning file
 /// identifier, e.g. "Light" -> "common").
 fn processShaderFile(
-    gpa: std.mem.Allocator,
+    allocator: std.mem.Allocator,
     io: std.Io,
     out: *std.ArrayList(u8),
     src: []const u8,
@@ -693,43 +693,43 @@ fn processShaderFile(
                 break :blk "";
             };
             if (inc.len > 0) {
-                const resolved = try resolveIncludePath(gpa, path, inc);
+                const resolved = try resolveIncludePath(allocator, path, inc);
                 if (!visited.contains(resolved)) {
-                    try visited.put(try gpa.dupe(u8, resolved), {});
-                    if (try readNodeFile(gpa, io, resolved)) |content| {
+                    try visited.put(try allocator.dupe(u8, resolved), {});
+                    if (try readNodeFile(allocator, io, resolved)) |content| {
                         const c = if (std.mem.startsWith(u8, content, "\xEF\xBB\xBF")) content[3..] else content;
                         if (std.mem.endsWith(u8, resolved, ".glsl")) {
                             const inc_base = std.fs.path.basename(resolved);
                             const dot = std.mem.lastIndexOfScalar(u8, inc_base, '.');
                             const base = if (dot) |d| inc_base[0..d] else inc_base;
-                            const inc_ident = try text_utils.filenameToIdentifier(gpa, base);
-                            const inc_no_comments = try stripComments(gpa, c);
-                            const inc_structs = try parseStructs(gpa, inc_no_comments);
+                            const inc_ident = try text_utils.filenameToIdentifier(allocator, base);
+                            const inc_no_comments = try stripComments(allocator, c);
+                            const inc_structs = try parseStructs(allocator, inc_no_comments);
                             for (inc_structs) |s| {
-                                const key = try gpa.dupe(u8, s.name);
-                                const ident_copy = try gpa.dupe(u8, inc_ident);
+                                const key = try allocator.dupe(u8, s.name);
+                                const ident_copy = try allocator.dupe(u8, inc_ident);
                                 if (!link_map.contains(key)) {
                                     try link_map.put(key, ident_copy);
                                 } else {
-                                    gpa.free(key);
-                                    gpa.free(ident_copy);
+                                    allocator.free(key);
+                                    allocator.free(ident_copy);
                                 }
                             }
-                            freeStructs(gpa, inc_structs);
-                            gpa.free(inc_no_comments);
-                            gpa.free(inc_ident);
+                            freeStructs(allocator, inc_structs);
+                            allocator.free(inc_no_comments);
+                            allocator.free(inc_ident);
                         }
-                        try processShaderFile(gpa, io, out, c, resolved, visited, link_map);
-                        gpa.free(content);
+                        try processShaderFile(allocator, io, out, c, resolved, visited, link_map);
+                        allocator.free(content);
                     }
                 }
-                gpa.free(resolved);
+                allocator.free(resolved);
             }
             continue;
         }
         if (std.mem.startsWith(u8, trimmed, "#version")) continue;
-        try out.appendSlice(gpa, line);
-        try out.append(gpa, '\n');
+        try out.appendSlice(allocator, line);
+        try out.append(allocator, '\n');
     }
 }
 
@@ -737,7 +737,7 @@ fn processShaderFile(
 /// file's `#version` is kept as the first line; includes are inlined at the
 /// position of their directive.
 /// Parameters:
-/// - gpa: allocator for internal use.
+/// - allocator: allocator for internal use.
 /// - io: Io interface for file reads.
 /// - out: output buffer for the assembled source.
 /// - main_src: source of the main shader file.
@@ -747,7 +747,7 @@ fn processShaderFile(
 ///
 /// Returns: void.
 pub fn resolveShaderIncludes(
-    gpa: std.mem.Allocator,
+    allocator: std.mem.Allocator,
     io: std.Io,
     out: *std.ArrayList(u8),
     main_src: []const u8,
@@ -760,13 +760,526 @@ pub fn resolveShaderIncludes(
         while (it.next()) |line| {
             const trimmed = std.mem.trim(u8, line, &[_]u8{ ' ', '\t', '\r' });
             if (std.mem.startsWith(u8, trimmed, "#version")) {
-                try out.appendSlice(gpa, line);
-                try out.append(gpa, '\n');
+                try out.appendSlice(allocator, line);
+                try out.append(allocator, '\n');
                 break;
             }
         }
     }
-    try processShaderFile(gpa, io, out, main_src, main_path, visited, link_map);
+    try processShaderFile(allocator, io, out, main_src, main_path, visited, link_map);
+}
+
+/// Errors for `ENUM_` define processing.
+/// Returned from `parseEnumDefines` with a `std.debug.print` hint explaining
+/// the single-`#define` contract (print, not log.err, so tests expecting
+/// errors do not fail the test runner on error logs).
+pub const EnumDefineError = error{
+    /// Same `ENUM_*` defined more than once in the combined source.
+    DuplicateEnumDefine,
+    /// `ENUM_*` compared in `#if`/`#elif` without exactly one `#define`.
+    MissingEnumDefault,
+    /// `#define`/`==` operand is not a single int/hex/identifier token.
+    InvalidEnumToken,
+    /// User `#define` uses a reserved `_N` / `_mN` / `_0x..` tag shape.
+    ReservedDefineName,
+    /// Suffix after `ENUM_` is not a valid Zig identifier.
+    InvalidEnumFieldName,
+};
+
+/// One collected value of an `ENUM_*` define: original GLSL token text
+/// plus the generated Zig enum tag (`0` -> `_0`, `-12` -> `_m12`,
+/// `0x10` -> `_0x10`, `TRUE` -> `TRUE`). No numeric normalization:
+/// `16` and `0x10` are different tokens and different tags.
+pub const EnumValueDef = struct {
+    /// Original token text as in GLSL (owned).
+    token: []u8,
+    /// Zig enum tag name (owned).
+    tag: []u8,
+};
+
+/// One unique `ENUM_*` define with all collected values, default index
+/// and the byte slot of the default token inside the template source
+/// (`{offset,len}` for minimal runtime splicing).
+pub const EnumDefineDef = struct {
+    /// Full GLSL name, e.g. `ENUM_MODE` (owned).
+    name: []u8,
+    /// Zig field name: suffix after `ENUM_`, 1:1 (owned).
+    field: []u8,
+    /// All possible values: default first, then first-appearance order (owned).
+    values: []EnumValueDef,
+    /// Index of the default value inside `values` (always 0 for now).
+    default_idx: usize,
+    /// Byte offset of the default token in the template source.
+    slot_offset: usize,
+    /// Byte length of the default token in the template source.
+    slot_len: usize,
+};
+
+/// Frees a slice of EnumDefineDef and all owned strings.
+pub fn freeEnumDefines(allocator: std.mem.Allocator, defs: []EnumDefineDef) void {
+    for (defs) |*d| {
+        allocator.free(d.name);
+        allocator.free(d.field);
+        for (d.values) |*v| {
+            allocator.free(v.token);
+            allocator.free(v.tag);
+        }
+        allocator.free(d.values);
+    }
+    allocator.free(defs);
+}
+
+/// Returns true for `[A-Za-z_][A-Za-z0-9_]*`.
+fn isIdentToken(tok: []const u8) bool {
+    if (tok.len == 0) return false;
+    const c0 = tok[0];
+    if (!((c0 >= 'A' and c0 <= 'Z') or (c0 >= 'a' and c0 <= 'z') or c0 == '_')) return false;
+    for (tok[1..]) |c| {
+        if (!((c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_')) return false;
+    }
+    return true;
+}
+
+/// Returns true for `-?[0-9]+`.
+fn isDecIntToken(tok: []const u8) bool {
+    var s = tok;
+    if (s.len > 0 and s[0] == '-') s = s[1..];
+    if (s.len == 0) return false;
+    for (s) |c| if (c < '0' or c > '9') return false;
+    return true;
+}
+
+/// Returns true for `-?0x[0-9a-fA-F]+` (any `0x`/`0X` case).
+fn isHexIntToken(tok: []const u8) bool {
+    var s = tok;
+    if (s.len > 0 and s[0] == '-') s = s[1..];
+    if (s.len < 3) return false;
+    if (s[0] != '0' or (s[1] != 'x' and s[1] != 'X')) return false;
+    if (s.len == 2) return false;
+    for (s[2..]) |c| {
+        const ok = (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
+        if (!ok) return false;
+    }
+    return true;
+}
+
+/// Returns true when a token is a valid single `ENUM_` value:
+/// decimal int, hex int or a plain identifier.
+fn isValidEnumToken(tok: []const u8) bool {
+    return isDecIntToken(tok) or isHexIntToken(tok) or isIdentToken(tok);
+}
+
+/// Returns true for reserved tag shapes the generator owns:
+/// `_N`, `_mN`, `_0x..`, `_m0x..` (any digit after `_` / `_m`,
+/// `0x` handled case-insensitively). Used to reject user `#define`s
+/// that would collide with generated `_0` / `_m12` tags.
+fn isReservedTagName(name: []const u8) bool {
+    if (name.len < 2 or name[0] != '_') return false;
+    var rest = name[1..];
+    if (rest.len > 0 and (rest[0] == 'm' or rest[0] == 'M')) rest = rest[1..];
+    if (rest.len == 0) return false;
+    if (rest[0] >= '0' and rest[0] <= '9') return true;
+    if (rest.len >= 2 and rest[0] == '0' and (rest[1] == 'x' or rest[1] == 'X')) return true;
+    return false;
+}
+
+/// Builds a Zig tag for one token without numeric normalization.
+/// Decimal: `0` -> `_0`, `-12` -> `_m12`. Hex: `0x10` -> `_0x10`,
+/// `-0xC` -> `_m0xC` (case preserved). Identifier: as is.
+fn enumTagForToken(allocator: std.mem.Allocator, token: []const u8) ![]u8 {
+    if (isDecIntToken(token)) {
+        if (token[0] == '-') return std.fmt.allocPrint(allocator, "_m{s}", .{token[1..]});
+        return std.fmt.allocPrint(allocator, "_{s}", .{token});
+    }
+    if (isHexIntToken(token)) {
+        if (token[0] == '-') return std.fmt.allocPrint(allocator, "_m{s}", .{token[1..]});
+        return std.fmt.allocPrint(allocator, "_{s}", .{token});
+    }
+    return allocator.dupe(u8, token);
+}
+
+/// Returns true for Zig keywords that cannot be struct/enum names.
+fn isZigKeyword(name: []const u8) bool {
+    const kws = [_][]const u8{ "addrspace", "align", "allowzero", "and", "anyframe", "anytype", "asm", "async", "await", "break", "catch", "comptime", "const", "continue", "defer", "else", "enum", "errdefer", "error", "export", "extern", "fn", "for", "if", "inline", "noalias", "noinline", "nosuspend", "opaque", "or", "orelse", "packed", "pub", "resume", "return", "linksection", "struct", "suspend", "switch", "test", "threadlocal", "try", "union", "unreachable", "usingnamespace", "var", "volatile", "while" };
+    for (kws) |k| if (std.mem.eql(u8, k, name)) return true;
+    return false;
+}
+
+/// Returns true for a valid Zig identifier that is not a keyword.
+fn isValidZigIdent(name: []const u8) bool {
+    if (!isIdentToken(name)) return false;
+    if (isZigKeyword(name)) return false;
+    return true;
+}
+
+/// Skips spaces/tabs in `s` from index `i`.
+fn skipBlank(s: []const u8, i: usize) usize {
+    var j = i;
+    while (j < s.len and (s[j] == ' ' or s[j] == '\t')) j += 1;
+    return j;
+}
+
+/// Parses `#define ENUM_*` / `#if` / `#elif` after includes are inlined.
+/// Template keeps comments, so directives inside `//` and `/* */` (and
+/// GLSL `"...` strings) are ignored via a space-preserving cleaned copy
+/// that keeps byte offsets intact.
+/// Contract: every mentioned `ENUM_*` must have exactly one `#define`
+/// with a single-token default; values are the default plus every token
+/// ever compared with `==` / `!=` in `#if` / `#elif` (both operand orders).
+/// `#ifdef` / `#ifndef` / runtime `if` are ignored. Anything else
+/// (expression, missing/duplicate define, reserved `_N` name) is an
+/// asset error with a `log.err` usage hint.
+/// Parameters:
+/// - allocator: allocator for results.
+/// - combined: inlined GLSL source (template, comments preserved).
+///
+/// Returns: defines in first-`#define` order (field order == slot order).
+pub fn parseEnumDefines(allocator: std.mem.Allocator, combined: []const u8) ![]EnumDefineDef {
+    var defs = std.ArrayList(EnumDefineDef).empty;
+    errdefer {
+        for (defs.items) |*d| {
+            allocator.free(d.name);
+            allocator.free(d.field);
+            for (d.values) |*v| {
+                allocator.free(v.token);
+                allocator.free(v.tag);
+            }
+            allocator.free(d.values);
+        }
+        defs.deinit(allocator);
+    }
+    var index_of = std.StringHashMap(usize).init(allocator);
+    errdefer {
+        var kit = index_of.iterator();
+        while (kit.next()) |e| allocator.free(e.key_ptr.*);
+        index_of.deinit();
+    }
+    var extra = std.StringHashMap(std.ArrayList([]u8)).init(allocator);
+    defer {
+        var it = extra.iterator();
+        while (it.next()) |e| {
+            for (e.value_ptr.items) |tok| allocator.free(tok);
+            e.value_ptr.deinit(allocator);
+            allocator.free(e.key_ptr.*);
+        }
+        extra.deinit();
+    }
+
+    var in_block = false;
+    var offset: usize = 0;
+    var line_it = std.mem.splitScalar(u8, combined, '\n');
+    while (line_it.next()) |raw_line| {
+        const line = if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\r') raw_line[0 .. raw_line.len - 1] else raw_line;
+        const line_start = offset;
+        offset += raw_line.len + 1;
+        if (line.len == 0) continue;
+        const cleaned = try allocator.alloc(u8, line.len);
+        defer allocator.free(cleaned);
+        @memcpy(cleaned, line);
+        {
+            var i: usize = 0;
+            var in_str = false;
+            while (i < line.len) {
+                if (in_block) {
+                    if (i + 1 < line.len and line[i] == '*' and line[i + 1] == '/') {
+                        cleaned[i] = ' ';
+                        cleaned[i + 1] = ' ';
+                        in_block = false;
+                        i += 2;
+                    } else {
+                        cleaned[i] = ' ';
+                        i += 1;
+                    }
+                    continue;
+                }
+                if (in_str) {
+                    if (line[i] == '\\' and i + 1 < line.len) {
+                        i += 2;
+                        continue;
+                    }
+                    if (line[i] == '"') in_str = false;
+                    i += 1;
+                    continue;
+                }
+                if (line[i] == '"') {
+                    in_str = true;
+                    i += 1;
+                    continue;
+                }
+                if (i + 1 < line.len and line[i] == '/' and line[i + 1] == '/') {
+                    var k = i;
+                    while (k < line.len) : (k += 1) cleaned[k] = ' ';
+                    break;
+                }
+                if (i + 1 < line.len and line[i] == '/' and line[i + 1] == '*') {
+                    cleaned[i] = ' ';
+                    cleaned[i + 1] = ' ';
+                    in_block = true;
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+            }
+        }
+        const trimmed = std.mem.trim(u8, cleaned, &[_]u8{ ' ', '\t' });
+        if (trimmed.len == 0) continue;
+        if (std.mem.startsWith(u8, trimmed, "#ifdef") or std.mem.startsWith(u8, trimmed, "#ifndef")) continue;
+        if (std.mem.startsWith(u8, trimmed, "#define")) {
+            var p = skipBlank(cleaned, std.mem.indexOf(u8, cleaned, "#define").? + "#define".len);
+            const name_start = p;
+            while (p < cleaned.len and (isAlnum(cleaned[p]) or cleaned[p] == '_')) p += 1;
+            const name = cleaned[name_start..p];
+            if (name.len == 0) continue;
+            const after_name = skipBlank(cleaned, p);
+            var tend = after_name;
+            while (tend < cleaned.len and !isWhitespace(cleaned[tend])) tend += 1;
+            const token = cleaned[after_name..tend];
+            const rest = std.mem.trim(u8, cleaned[tend..], &[_]u8{ ' ', '\t' });
+            const is_enum = std.mem.startsWith(u8, name, "ENUM_");
+            if (!is_enum) {
+                if (isReservedTagName(name)) {
+                    std.debug.print("ENUM_: user #define '{s}' uses reserved tag shape `_N`/`_mN`/`_0x..`. Rename it: `_0`, `_m12`, `_0x10` are generated from numeric ENUM_ values.\n", .{name});
+                    return error.ReservedDefineName;
+                }
+                continue;
+            }
+            if (token.len == 0 or rest.len != 0) {
+                std.debug.print("ENUM_: '#define {s}' must have exactly one value token (int, hex or macro name). Example: `#define {s} 0`. Move expressions into a separate `#define OTHER ...` and use its name.", .{ name, name });
+                return error.InvalidEnumToken;
+            }
+            if (!isValidEnumToken(token)) {
+                std.debug.print("ENUM_: '#define {s} {s}': value must be a single decimal int (`0`, `-12`), hex (`0x10`) or macro name (`TRUE`). No expressions or parens.", .{ name, token });
+                return error.InvalidEnumToken;
+            }
+            if (index_of.contains(name)) {
+                std.debug.print("ENUM_: duplicate `#define {s}`. Keep exactly one `#define {s} <default>` in the whole inlined source (includes count); runtime variants replace its token in place.", .{ name, name });
+                return error.DuplicateEnumDefine;
+            }
+            const suffix = name["ENUM_".len..];
+            if (suffix.len == 0 or !isValidZigIdent(suffix)) {
+                std.debug.print("ENUM_: name '{s}' has invalid suffix '{s}' after `ENUM_`. The suffix becomes a Zig field 1:1, so it must be `[A-Za-z_][A-Za-z0-9_]*` and not a Zig keyword.", .{ name, suffix });
+                return error.InvalidEnumFieldName;
+            }
+            if (isReservedTagName(token) and isIdentToken(token)) {
+                std.debug.print("ENUM_: value '{s}' for '{s}' uses reserved tag shape. Do not define macros named `_0`, `_m12`, `_0x10` yourself.", .{ token, name });
+                return error.ReservedDefineName;
+            }
+            const name_copy = try allocator.dupe(u8, name);
+            errdefer allocator.free(name_copy);
+            const field_copy = try allocator.dupe(u8, suffix);
+            errdefer allocator.free(field_copy);
+            const tok_copy = try allocator.dupe(u8, token);
+            errdefer allocator.free(tok_copy);
+            const tag = try enumTagForToken(allocator, token);
+            errdefer allocator.free(tag);
+            const vals = try allocator.alloc(EnumValueDef, 1);
+            vals[0] = .{ .token = tok_copy, .tag = tag };
+            const tok_start_in_line = after_name;
+            try defs.append(allocator, .{
+                .name = name_copy,
+                .field = field_copy,
+                .values = vals,
+                .default_idx = 0,
+                .slot_offset = line_start + tok_start_in_line,
+                .slot_len = token.len,
+            });
+            try index_of.put(try allocator.dupe(u8, name), defs.items.len - 1);
+            continue;
+        }
+        const is_if = std.mem.startsWith(u8, trimmed, "#if") or std.mem.startsWith(u8, trimmed, "#elif");
+        if (!is_if) {
+            if (std.mem.startsWith(u8, trimmed, "#define")) continue;
+            var k: usize = 0;
+            while (k < cleaned.len) {
+                if (cleaned[k] == '_' or (cleaned[k] >= 'A' and cleaned[k] <= 'Z') or (cleaned[k] >= 'a' and cleaned[k] <= 'z')) {
+                    var e = k;
+                    while (e < cleaned.len and (isAlnum(cleaned[e]) or cleaned[e] == '_')) e += 1;
+                    const word = cleaned[k..e];
+                    if (std.mem.startsWith(u8, word, "ENUM_") and word.len > 5 and !index_of.contains(word) and !extra.contains(word)) {
+                        // Mention outside #if/#define does not create values,
+                        // but a later validation still requires a default once
+                        // the name is used anywhere? No: only #if comparisons
+                        // extend the value set; plain mentions are ignored.
+                    }
+                    k = e;
+                } else k += 1;
+            }
+            continue;
+        }
+        var s: usize = 0;
+        while (s < cleaned.len) {
+            const op_at: ?usize = blk: {
+                var q = s;
+                while (q + 1 < cleaned.len) : (q += 1) {
+                    if ((cleaned[q] == '=' and cleaned[q + 1] == '=') or (cleaned[q] == '!' and cleaned[q + 1] == '=')) break :blk q;
+                }
+                break :blk null;
+            };
+            const op = op_at orelse break;
+            var l_end = op;
+            while (l_end > s and (cleaned[l_end - 1] == ' ' or cleaned[l_end - 1] == '\t' or cleaned[l_end - 1] == '(')) l_end -= 1;
+            var l_start = l_end;
+            while (l_start > s and (isAlnum(cleaned[l_start - 1]) or cleaned[l_start - 1] == '_' or cleaned[l_start - 1] == 'x' or cleaned[l_start - 1] == 'X')) l_start -= 1;
+            if (l_start < l_end and l_start > s and cleaned[l_start - 1] == '-') l_start -= 1;
+            var r_start = op + 2;
+            while (r_start < cleaned.len and (cleaned[r_start] == ' ' or cleaned[r_start] == '\t' or cleaned[r_start] == '(')) r_start += 1;
+            var r_end = r_start;
+            if (r_end < cleaned.len and cleaned[r_end] == '-') r_end += 1;
+            while (r_end < cleaned.len and (isAlnum(cleaned[r_end]) or cleaned[r_end] == '_')) r_end += 1;
+            const left = if (l_start < l_end) std.mem.trim(u8, cleaned[l_start..l_end], &[_]u8{ ' ', '\t', '(', ')' }) else "";
+            const right = if (r_start < r_end) cleaned[r_start..r_end] else "";
+            const enum_side: ?[]const u8 = if (std.mem.startsWith(u8, left, "ENUM_")) left else if (std.mem.startsWith(u8, right, "ENUM_")) right else null;
+            const other_side: []const u8 = if (enum_side == null) "" else if (enum_side.? .ptr == left.ptr) right else left;
+            s = r_end + 1;
+            const ename = enum_side orelse continue;
+            if (!isIdentToken(ename) or !std.mem.startsWith(u8, ename, "ENUM_")) continue;
+            if (other_side.len == 0 or !isValidEnumToken(other_side)) {
+                std.debug.print("ENUM_: comparison for '{s}' must use a single token (`#if {s} == 1`, `== OTHER`). No expressions or parens around the value.", .{ ename, ename });
+                return error.InvalidEnumToken;
+            }
+            if (isIdentToken(other_side) and isReservedTagName(other_side)) {
+                std.debug.print("ENUM_: compared value '{s}' uses reserved tag shape `_N`/`_mN`. Rename your macro.", .{other_side});
+                return error.ReservedDefineName;
+            }
+            const owned_key = try allocator.dupe(u8, ename);
+            const gop = try extra.getOrPut(owned_key);
+            if (gop.found_existing) allocator.free(owned_key) else gop.value_ptr.* = std.ArrayList([]u8).empty;
+            var seen = false;
+            for (gop.value_ptr.items) |t| {
+                if (std.mem.eql(u8, t, other_side)) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (index_of.get(ename)) |di| {
+                for (defs.items[di].values) |v| {
+                    if (std.mem.eql(u8, v.token, other_side)) {
+                        seen = true;
+                        break;
+                    }
+                }
+            }
+            if (!seen) try gop.value_ptr.append(allocator, try allocator.dupe(u8, other_side));
+        }
+    }
+    {
+        var it = extra.iterator();
+        while (it.next()) |e| {
+            const idx = index_of.get(e.key_ptr.*) orelse {
+                std.debug.print("ENUM_: '{s}' is compared in `#if`/`#elif` but has no `#define`. Add exactly one `#define {s} <default>` (int, hex or macro name); runtime `use` will replace its token in place. Example:\n  #define {s} 0\n  #if {s} == 1\n  #elif {s} == OTHER", .{ e.key_ptr.*, e.key_ptr.*, e.key_ptr.*, e.key_ptr.*, e.key_ptr.* });
+                return error.MissingEnumDefault;
+            };
+            for (e.value_ptr.items) |tok| {
+                var dup = false;
+                for (defs.items[idx].values) |v| {
+                    if (std.mem.eql(u8, v.token, tok)) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (dup) continue;
+                const tag = try enumTagForToken(allocator, tok);
+                errdefer allocator.free(tag);
+                for (defs.items[idx].values) |v| {
+                    if (std.mem.eql(u8, v.tag, tag)) {
+                        allocator.free(tag);
+                        std.debug.print("ENUM_: tag collision for '{s}': tokens map to the same Zig tag. Rename the macro value.", .{defs.items[idx].name});
+                        return error.InvalidEnumToken;
+                    }
+                }
+                const old = defs.items[idx].values;
+                const grown = try allocator.alloc(EnumValueDef, old.len + 1);
+                @memcpy(grown[0..old.len], old);
+                grown[old.len] = .{ .token = try allocator.dupe(u8, tok), .tag = tag };
+                allocator.free(old);
+                defs.items[idx].values = grown;
+            }
+        }
+    }
+    {
+        var kit = index_of.iterator();
+        while (kit.next()) |e| allocator.free(e.key_ptr.*);
+        index_of.deinit();
+    }
+    return defs.toOwnedSlice(allocator);
+}
+
+/// Appends a Zig string literal (`"..."` with `\\`, `\"`, `\n` escapes,
+/// `\r` dropped) for `s` into `out`.
+pub fn appendZigStringLiteral(allocator: std.mem.Allocator, out: *std.ArrayList(u8), s: []const u8) !void {
+    try out.append(allocator, '"');
+    for (s) |ch| {
+        switch (ch) {
+            '\\' => try out.appendSlice(allocator, "\\\\"),
+            '"' => try out.appendSlice(allocator, "\\\""),
+            '\n' => try out.appendSlice(allocator, "\\n"),
+            '\r' => {},
+            else => try out.append(allocator, ch),
+        }
+    }
+    try out.append(allocator, '"');
+}
+
+/// Generates Zig declarations for `ENUM_` variants into `inner`:
+/// one `pub const <SUFFIX>` enum per define (with `text()` returning the
+/// original GLSL token), `pub const EnumDefines` with defaults from the
+/// single `#define`, plus `template_src` (full inlined GLSL, comments kept)
+/// and `define_slots` (`{offset,len}` of each default token, field order).
+/// `template_src` must be the exact `combined` slice the offsets refer to.
+pub fn appendEnumDefinesCode(
+    allocator: std.mem.Allocator,
+    inner: *std.ArrayList(u8),
+    enum_defs: []const EnumDefineDef,
+    template_src: []const u8,
+) !void {
+    for (enum_defs) |d| {
+        try inner.appendSlice(allocator, "    pub const ");
+        try inner.appendSlice(allocator, d.field);
+        try inner.appendSlice(allocator, " = enum {\n");
+        for (d.values) |v| {
+            try inner.appendSlice(allocator, "        ");
+            try inner.appendSlice(allocator, v.tag);
+            try inner.appendSlice(allocator, ",\n");
+        }
+        try inner.appendSlice(allocator, "\n");
+        try inner.appendSlice(allocator, "        pub fn text(self: @This()) []const u8 {\n");
+        try inner.appendSlice(allocator, "            return switch (self) {\n");
+        for (d.values) |v| {
+            try inner.appendSlice(allocator, "                .");
+            try inner.appendSlice(allocator, v.tag);
+            try inner.appendSlice(allocator, " => ");
+            try appendZigStringLiteral(allocator, inner, v.token);
+            try inner.appendSlice(allocator, ",\n");
+        }
+        try inner.appendSlice(allocator, "            };\n");
+        try inner.appendSlice(allocator, "        }\n");
+        try inner.appendSlice(allocator, "    };\n\n");
+    }
+    if (enum_defs.len == 0) {
+        try inner.appendSlice(allocator, "    pub const EnumDefines = struct {};\n\n");
+    } else {
+        try inner.appendSlice(allocator, "    pub const EnumDefines = struct {\n");
+        for (enum_defs) |d| {
+            try inner.appendSlice(allocator, "        ");
+            try inner.appendSlice(allocator, d.field);
+            try inner.appendSlice(allocator, ": ");
+            try inner.appendSlice(allocator, d.field);
+            try inner.appendSlice(allocator, " = .");
+            try inner.appendSlice(allocator, d.values[d.default_idx].tag);
+            try inner.appendSlice(allocator, ",\n");
+        }
+        try inner.appendSlice(allocator, "    };\n\n");
+    }
+    try inner.appendSlice(allocator, "    const template_src: []const u8 = ");
+    try appendZigStringLiteral(allocator, inner, template_src);
+    try inner.appendSlice(allocator, ";\n");
+    try inner.appendSlice(allocator, "    const define_slots = [_]@import(\"gl_graphics\").DefineSlot{\n");
+    for (enum_defs) |d| {
+        const line = try std.fmt.allocPrint(allocator, "        .{{ .offset = {d}, .len = {d} }},\n", .{ d.slot_offset, d.slot_len });
+        defer allocator.free(line);
+        try inner.appendSlice(allocator, line);
+    }
+    try inner.appendSlice(allocator, "    };\n\n");
 }
 
 test "parse structs" {
@@ -834,4 +1347,71 @@ test "map glsl to zig" {
     const t2 = try mapGLSLTypeToZig(alloc, "sampler2D");
     defer alloc.free(t2);
     try std.testing.expectEqualStrings("*const @import(\"gl_graphics\").Texture", t2);
+}
+
+test "enum defines basic with if comparisons" {
+    const alloc = std.testing.allocator;
+    const src = "#version 300 es\n#define ENUM_MODE 0\n#if ENUM_MODE == 1\n#endif\n#if ENUM_MODE == OTHER\n#endif\nvoid main() {}\n";
+    const defs = try parseEnumDefines(alloc, src);
+    defer freeEnumDefines(alloc, defs);
+    try std.testing.expectEqual(@as(usize, 1), defs.len);
+    try std.testing.expectEqualStrings("ENUM_MODE", defs[0].name);
+    try std.testing.expectEqualStrings("MODE", defs[0].field);
+    try std.testing.expectEqual(@as(usize, 3), defs[0].values.len);
+    try std.testing.expectEqualStrings("0", defs[0].values[0].token);
+    try std.testing.expectEqualStrings("_0", defs[0].values[0].tag);
+    try std.testing.expectEqualStrings("1", defs[0].values[1].token);
+    try std.testing.expectEqualStrings("OTHER", defs[0].values[2].token);
+}
+
+test "enum defines ignores comments and ifdef" {
+    const alloc = std.testing.allocator;
+    const src = "#version 300 es\n// #define ENUM_BAD 1\n/* #define ENUM_BAD2 2 */\n#define ENUM_OK TRUE\n#ifdef ENUM_OK\n#endif\nvoid main() {}\n";
+    const defs = try parseEnumDefines(alloc, src);
+    defer freeEnumDefines(alloc, defs);
+    try std.testing.expectEqual(@as(usize, 1), defs.len);
+    try std.testing.expectEqualStrings("ENUM_OK", defs[0].name);
+}
+
+test "enum defines duplicate and missing errors" {
+    const alloc = std.testing.allocator;
+    const dup = "#version 300 es\n#define ENUM_A 0\n#define ENUM_A 1\n";
+    try std.testing.expectError(error.DuplicateEnumDefine, parseEnumDefines(alloc, dup));
+    const miss = "#version 300 es\n#if ENUM_MISSING == 1\n#endif\n";
+    try std.testing.expectError(error.MissingEnumDefault, parseEnumDefines(alloc, miss));
+    const bad_tok = "#version 300 es\n#define ENUM_B 1+2\n";
+    try std.testing.expectError(error.InvalidEnumToken, parseEnumDefines(alloc, bad_tok));
+    const reserved = "#version 300 es\n#define _0 5\n";
+    try std.testing.expectError(error.ReservedDefineName, parseEnumDefines(alloc, reserved));
+}
+
+test "enum defines hex no normalization and negative" {
+    const alloc = std.testing.allocator;
+    const src = "#version 300 es\n#define ENUM_H 0x10\n#if ENUM_H == 16\n#endif\n#if ENUM_H == -12\n#endif\n";
+    const defs = try parseEnumDefines(alloc, src);
+    defer freeEnumDefines(alloc, defs);
+    try std.testing.expectEqual(@as(usize, 3), defs[0].values.len);
+    try std.testing.expectEqualStrings("_0x10", defs[0].values[0].tag);
+    try std.testing.expectEqualStrings("_16", defs[0].values[1].tag);
+    try std.testing.expectEqualStrings("_m12", defs[0].values[2].tag);
+}
+
+test "enum defines codegen emits template and slots" {
+    const alloc = std.testing.allocator;
+    const src = "#version 300 es\n#define ENUM_MODE 0\n#if ENUM_MODE == 1\n#endif\nvoid main() {}\n";
+    const defs = try parseEnumDefines(alloc, src);
+    defer freeEnumDefines(alloc, defs);
+    var inner: std.ArrayList(u8) = .empty;
+    defer inner.deinit(alloc);
+    try appendEnumDefinesCode(alloc, &inner, defs, src);
+    const code = try inner.toOwnedSlice(alloc);
+    defer alloc.free(code);
+    try std.testing.expect(std.mem.indexOf(u8, code, "pub const MODE = enum") != null);
+    try std.testing.expect(std.mem.indexOf(u8, code, "pub const EnumDefines = struct") != null);
+    try std.testing.expect(std.mem.indexOf(u8, code, "template_src") != null);
+    try std.testing.expect(std.mem.indexOf(u8, code, "define_slots") != null);
+    try std.testing.expect(std.mem.indexOf(u8, code, "_0") != null);
+    // Slot must point at the default token so a splice reproduces the variant.
+    const off = defs[0].slot_offset;
+    try std.testing.expectEqualStrings("0", src[off .. off + defs[0].slot_len]);
 }

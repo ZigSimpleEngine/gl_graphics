@@ -33,10 +33,10 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test "simple test" {
-    const gpa = std.testing.allocator;
+    const allocator = std.testing.allocator;
     var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa);
-    try list.append(gpa, 42);
+    defer list.deinit(allocator);
+    try list.append(allocator, 42);
     try std.testing.expectEqual(@as(i32, 42), list.pop());
 }
 
@@ -48,12 +48,12 @@ test "fuzz example" {
 fn testOne(context: void, smith: *std.testing.Smith) !void {
     _ = context;
 
-    const gpa = std.testing.allocator;
+    const allocator = std.testing.allocator;
     var list: std.ArrayList(u8) = .empty;
-    defer list.deinit(gpa);
+    defer list.deinit(allocator);
     while (!smith.eos()) switch (smith.value(enum { add_data, dup_data })) {
         .add_data => {
-            const slice = try list.addManyAsSlice(gpa, smith.value(u4));
+            const slice = try list.addManyAsSlice(allocator, smith.value(u4));
             smith.bytes(slice);
         },
         .dup_data => {
@@ -61,7 +61,7 @@ fn testOne(context: void, smith: *std.testing.Smith) !void {
             if (list.items.len > std.math.maxInt(u32)) return error.SkipZigTest;
             const len = smith.valueRangeAtMost(u32, 1, @min(32, list.items.len));
             const off = smith.valueRangeAtMost(u32, 0, @intCast(list.items.len - len));
-            try list.appendSlice(gpa, list.items[off..][0..len]);
+            try list.appendSlice(allocator, list.items[off..][0..len]);
             try std.testing.expectEqualSlices(
                 u8,
                 list.items[off..][0..len],

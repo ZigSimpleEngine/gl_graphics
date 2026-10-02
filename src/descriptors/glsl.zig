@@ -41,75 +41,75 @@ pub const GlslDescriptor = struct {
     /// Returns: allocated Zig source string.
     pub fn getCode(ptr: *anyopaque, init: std.process.Init, data: EmbedDescriptor.Data) anyerror![]u8 {
         const self: *GlslDescriptor = @ptrCast(@alignCast(ptr));
-        const gpa = init.gpa;
+        const allocator = init.gpa;
         const io = init.io;
         const node = data.node;
         const depth = data.depth;
 
-        const prefix = try text_utils.repeat(gpa, " ", depth * self.spaces_per_depth);
-        defer if (prefix) |p| gpa.free(p);
+        const prefix = try text_utils.repeat(allocator, " ", depth * self.spaces_per_depth);
+        defer if (prefix) |p| allocator.free(p);
 
-        const path = try node.createPath(gpa);
-        defer gpa.free(path);
+        const path = try node.createPath(allocator);
+        defer allocator.free(path);
 
         const identifier_raw = node.name orelse return error.MissingName;
         const dot = std.mem.lastIndexOfScalar(u8, identifier_raw, '.');
         const baseName = if (dot) |d| identifier_raw[0..d] else identifier_raw;
-        const var_name = try text_utils.filenameToIdentifier(gpa, baseName);
-        defer gpa.free(var_name);
+        const var_name = try text_utils.filenameToIdentifier(allocator, baseName);
+        defer allocator.free(var_name);
 
-        const rawContent = try common.readNodeFile(gpa, io, path) orelse blk: {
-            break :blk try gpa.dupe(u8, "");
+        const rawContent = try common.readNodeFile(allocator, io, path) orelse blk: {
+            break :blk try allocator.dupe(u8, "");
         };
-        defer gpa.free(rawContent);
+        defer allocator.free(rawContent);
 
-        const no_comments = try common.stripComments(gpa, rawContent);
-        defer gpa.free(no_comments);
+        const no_comments = try common.stripComments(allocator, rawContent);
+        defer allocator.free(no_comments);
 
-        const structs = try common.parseStructs(gpa, no_comments);
-        defer common.freeStructs(gpa, structs);
+        const structs = try common.parseStructs(allocator, no_comments);
+        defer common.freeStructs(allocator, structs);
 
         var inner = std.ArrayList(u8).empty;
-        defer inner.deinit(gpa);
+        defer inner.deinit(allocator);
 
         if (structs.len == 0) {
-            try inner.appendSlice(gpa, "    // No struct declarations found in .glsl source.\n");
+            try inner.appendSlice(allocator, "    // No struct declarations found in .glsl source.\n");
         } else {
             for (structs) |s| {
-                try inner.appendSlice(gpa, "    pub const ");
-                try inner.appendSlice(gpa, s.name);
-                try inner.appendSlice(gpa, " = struct {\n");
+                try inner.appendSlice(allocator, "    pub const ");
+                try inner.appendSlice(allocator, s.name);
+                try inner.appendSlice(allocator, " = struct {\n");
                 for (s.fields) |f| {
-                    const zig_type = try common.mapGLSLTypeToZig(gpa, f.typ);
-                    defer gpa.free(zig_type);
-                    try inner.appendSlice(gpa, "        ");
-                    try inner.appendSlice(gpa, f.name);
-                    try inner.appendSlice(gpa, ": ");
+                    const zig_type = try common.mapGLSLTypeToZig(allocator, f.typ);
+                    defer allocator.free(zig_type);
+                    try inner.appendSlice(allocator, "        ");
+                    try inner.appendSlice(allocator, f.name);
+                    try inner.appendSlice(allocator, ": ");
                     if (f.is_array) {
                         if (f.array_len) |len| {
-                            const tmp = try std.fmt.allocPrint(gpa, "[{d}]{s}", .{ len, zig_type });
-                            defer gpa.free(tmp);
-                            try inner.appendSlice(gpa, tmp);
+                            const tmp = try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
+                            defer allocator.free(tmp);
+                            try inner.appendSlice(allocator, tmp);
                         } else {
-                            const tmp = try std.fmt.allocPrint(gpa, "[]{s}", .{zig_type});
-                            defer gpa.free(tmp);
-                            try inner.appendSlice(gpa, tmp);
+                            const tmp = try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
+                            defer allocator.free(tmp);
+                            try inner.appendSlice(allocator, tmp);
                         }
                     } else {
-                        try inner.appendSlice(gpa, zig_type);
+                        try inner.appendSlice(allocator, zig_type);
                     }
-                    try inner.appendSlice(gpa, ",\n");
+                    try inner.appendSlice(allocator, ",\n");
                 }
-                try inner.appendSlice(gpa, "    };\n");
+                try inner.appendSlice(allocator, "    };\n");
             }
         }
 
-        const inner_slice = try inner.toOwnedSlice(gpa);
-        defer gpa.free(inner_slice);
+        const inner_slice = try inner.toOwnedSlice(allocator);
+        defer allocator.free(inner_slice);
 
         const new_line_after = if (inner_slice.len > 0 and inner_slice[inner_slice.len - 1] == '\n') "" else "\n";
 
-        return std.fmt.allocPrint(gpa,
+        return std.fmt.allocPrint(allocator,
             "{s}pub const {s} = struct {{\n{s}{s}{s}}};\n",
             .{
                 prefix orelse "",

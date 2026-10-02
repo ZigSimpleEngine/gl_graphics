@@ -992,9 +992,9 @@ pub fn Mesh(comptime Vertex: type) type {
 test "mesh editor soa2 basic and extra fields" {
     const V = struct { pos: math.Vec(3, f32), uv: math.Vec(2, f32) };
     const M = Mesh(V);
-    const gpa = std.testing.allocator;
-    const mesh = try M.create(gpa);
-    defer mesh.destroy(gpa);
+    const allocator = std.testing.allocator;
+    const mesh = try M.create(allocator);
+    defer mesh.destroy(allocator);
     const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 0, 0 }) };
     const uv = [_]math.Vec(2, f32){ math.Vec(2, f32).init(.{ 0, 0 }), math.Vec(2, f32).init(.{ 1, 1 }) };
     // source with extra field should be accepted, extra ignored
@@ -1010,17 +1010,17 @@ test "mesh editor soa2 basic and extra fields" {
 test "mesh editor soa2 delegates to soa" {
     const V = struct { aPos: math.Vec(3, f32), aNormal: math.Vec(3, f32) };
     const M = Mesh(V);
-    const gpa = std.testing.allocator;
-    const mesh = try M.create(gpa);
-    defer mesh.destroy(gpa);
+    const allocator = std.testing.allocator;
+    const mesh = try M.create(allocator);
+    defer mesh.destroy(allocator);
     const aPos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 2, 3 }) };
     const aNormal = [_]math.Vec(3, f32){ math.Vec(3, f32).init(.{ 0, 0, 1 }), math.Vec(3, f32).init(.{ 0, 1, 0 }) };
     const src = .{ .aPos = aPos[0..], .aNormal = aNormal[0..] };
     mesh.edit().setVerticesSOA2(src).apply();
     try std.testing.expect(mesh.getVertexCount() == 2);
     // direct soa should give same result
-    const mesh2 = try M.create(gpa);
-    defer mesh2.destroy(gpa);
+    const mesh2 = try M.create(allocator);
+    defer mesh2.destroy(allocator);
     mesh2.edit().setVerticesSOA(.{ .aPos = aPos[0..], .aNormal = aNormal[0..] }).apply();
     try std.testing.expect(mesh2.getVertexCount() == 2);
 }
@@ -1028,9 +1028,9 @@ test "mesh editor soa2 delegates to soa" {
 test "mesh editor soa2 exact match with shader names" {
     const V = struct { position: math.Vec(3, f32), normal: math.Vec(3, f32), uv: math.Vec(2, f32) };
     const M = Mesh(V);
-    const gpa = std.testing.allocator;
-    const mesh = try M.create(gpa);
-    defer mesh.destroy(gpa);
+    const allocator = std.testing.allocator;
+    const mesh = try M.create(allocator);
+    defer mesh.destroy(allocator);
     const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 0, 0 }) };
     const nrm = [_]math.Vec(3, f32){ math.Vec(3, f32).init(.{ 0, 0, 1 }), math.Vec(3, f32).init(.{ 0, 1, 0 }) };
     const uv = [_]math.Vec(2, f32){ math.Vec(2, f32).init(.{ 0, 0 }), math.Vec(2, f32).init(.{ 1, 1 }) };
@@ -1045,9 +1045,9 @@ test "mesh editor soa2 exact match with shader names" {
 test "mesh setMeshSOA sets vertices and indices" {
     const V = struct { position: math.Vec(3, f32), uv: math.Vec(2, f32) };
     const M = Mesh(V);
-    const gpa = std.testing.allocator;
-    const mesh = try M.create(gpa);
-    defer mesh.destroy(gpa);
+    const allocator = std.testing.allocator;
+    const mesh = try M.create(allocator);
+    defer mesh.destroy(allocator);
     const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 0, 0 }), math.Vec(3, f32).init(.{ 0, 1, 0 }) };
     const uv = [_]math.Vec(2, f32){ math.Vec(2, f32).init(.{ 0, 0 }), math.Vec(2, f32).init(.{ 1, 0 }), math.Vec(2, f32).init(.{ 0, 1 }) };
     const idx = [_]u16{ 0, 1, 2 };
@@ -1061,9 +1061,9 @@ test "mesh setMeshSOA sets vertices and indices" {
 test "mesh setMeshSOA without indices" {
     const V = struct { position: math.Vec(3, f32) };
     const M = Mesh(V);
-    const gpa = std.testing.allocator;
-    const mesh = try M.create(gpa);
-    defer mesh.destroy(gpa);
+    const allocator = std.testing.allocator;
+    const mesh = try M.create(allocator);
+    defer mesh.destroy(allocator);
     const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 0, 0 }) };
     const meshData = .{ .position = pos[0..] };
     mesh.edit().setMeshSOA(meshData).apply();
@@ -1074,13 +1074,13 @@ test "mesh setMeshSOA without indices" {
 test "mesh createWithSOA" {
     const V = struct { position: math.Vec(3, f32), uv: math.Vec(2, f32) };
     const M = Mesh(V);
-    const gpa = std.testing.allocator;
+    const allocator = std.testing.allocator;
     const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).zero(), math.Vec(3, f32).init(.{ 1, 0, 0 }) };
     const uv = [_]math.Vec(2, f32){ math.Vec(2, f32).init(.{ 0, 0 }), math.Vec(2, f32).init(.{ 1, 0 }) };
     const idx = [_]u16{ 0, 1 };
     const meshData = .{ .position = pos[0..], .uv = uv[0..], .indices = idx[0..] };
-    const mesh = try M.createWithSOA(gpa, meshData);
-    defer mesh.destroy(gpa);
+    const mesh = try M.createWithSOA(allocator, meshData);
+    defer mesh.destroy(allocator);
     try std.testing.expect(mesh.getVertexCount() == 2);
     try std.testing.expect(mesh.getIndexCount() == 2);
 }

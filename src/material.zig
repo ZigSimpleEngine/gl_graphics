@@ -28,7 +28,9 @@ fn checkShaderOwner(comptime U: type, comptime param_name: []const u8) type {
     const Owner = U.Owner;
     if (@typeInfo(Owner) != .@"struct") @compileError("Material: '" ++ param_name ++ "' Owner must be the shader descriptor struct, got " ++ @typeName(Owner) ++ ".");
     if (Owner.Uniform != U) @compileError("Material: '" ++ param_name ++ "' type " ++ @typeName(U) ++ " does not belong to its Owner " ++ @typeName(Owner) ++ " (Owner.Uniform differs). Pass exactly Owner.Uniform.");
-    if (!@hasDecl(Owner, "instance") or @typeInfo(@TypeOf(Owner.instance)) != .@"fn") @compileError("Material: shader " ++ @typeName(Owner) ++ " must expose `pub fn instance() u32`.");
+    if (!@hasDecl(Owner, "EnumDefines")) @compileError("Material: shader " ++ @typeName(Owner) ++ " must expose `pub const EnumDefines` (regenerate descriptors).");
+    if (!@hasDecl(Owner, "instance") or @typeInfo(@TypeOf(Owner.instance)) != .@"fn") @compileError("Material: shader " ++ @typeName(Owner) ++ " must expose `pub fn instance(allocator, defines) !u32`.");
+    if (!@hasDecl(Owner, "destroy") or @typeInfo(@TypeOf(Owner.destroy)) != .@"fn") @compileError("Material: shader " ++ @typeName(Owner) ++ " must expose `pub fn destroy(allocator) void`.");
     if (!@hasDecl(Owner, "edit") or @typeInfo(@TypeOf(Owner.edit)) != .@"fn") @compileError("Material: shader " ++ @typeName(Owner) ++ " must expose `pub fn edit(u32) Editor`.");
     if (!@hasDecl(Owner, "Editor")) @compileError("Material: shader " ++ @typeName(Owner) ++ " must expose `pub const Editor`.");
     if (!@hasDecl(Owner.Editor, "setUniform") or !@hasDecl(Owner.Editor, "apply")) @compileError("Material: shader " ++ @typeName(Owner) ++ ".Editor must expose `setUniform` and `apply`.");
@@ -72,11 +74,12 @@ fn readUniformField(comptime U: type, uniform: *U, field_id: u32, comptime T: ty
 /// Shared by the `use` of both material kinds.
 /// Parameters:
 /// - Prog: concrete program type (`ShaderProgram` or `VertexProgram`).
+/// - program: linked variant id to upload to.
 /// - vert_uniform: cached vertex uniform value.
 ///
 /// Returns: void.
-fn uploadVertUniform(comptime Prog: type, vert_uniform: Prog.Vert.Uniform) void {
-    var ve = Prog.vertEdit();
+fn uploadVertUniform(comptime Prog: type, program: u32, vert_uniform: Prog.Vert.Uniform) void {
+    var ve = Prog.vertEdit(program);
     _ = ve.setUniform(vert_uniform);
     ve.apply();
 }
@@ -85,11 +88,12 @@ fn uploadVertUniform(comptime Prog: type, vert_uniform: Prog.Vert.Uniform) void 
 /// Used only by the full `Material` (concrete `ShaderProgram`).
 /// Parameters:
 /// - Prog: concrete `ShaderProgram` type.
+/// - program: linked variant id to upload to.
 /// - frag_uniform: cached fragment uniform value.
 ///
 /// Returns: void.
-fn uploadFragUniform(comptime Prog: type, frag_uniform: Prog.Frag.Uniform) void {
-    var fe = Prog.fragEdit();
+fn uploadFragUniform(comptime Prog: type, program: u32, frag_uniform: Prog.Frag.Uniform) void {
+    var fe = Prog.fragEdit(program);
     _ = fe.setUniform(frag_uniform);
     fe.apply();
 }
@@ -137,7 +141,8 @@ fn uploadFragUniform(comptime Prog: type, frag_uniform: Prog.Frag.Uniform) void 
 /// const M = Material(MyVert.Uniform, .{ .uMvp = mvp, .uTex = undefined }, MyFrag.Uniform, .{ .uColor = white });
 /// var m: M = .{};
 /// m.vertUniform.uTex = &tex;
-/// m.use();
+/// m.vertDefines.MODE = ._1;
+/// try m.use(allocator);
 /// ```
 pub fn Material(
     comptime vert_uniform: type,
@@ -165,6 +170,10 @@ pub fn Material(
         vertUniform: vert_uniform = vert_uniform_value,
         /// Cached fragment uniform values (defaults from `frag_uniform_value`).
         fragUniform: frag_uniform = frag_uniform_value,
+        /// Cached vertex defines (defaults from the single `#define`s).
+        vertDefines: Vert.EnumDefines = .{},
+        /// Cached fragment defines (defaults from the single `#define`s).
+        fragDefines: Frag.EnumDefines = .{},
 
         /// Errors for name/id based uniform field access.
         pub const UniformFieldError = gpu_meta.ResourceError;
@@ -235,18 +244,51 @@ pub fn Material(
             return readUniformField(frag_uniform, &self.fragUniform, field_id, T);
         }
 
-        /// Binds the program and uploads uniforms via editors.
-        /// Dynamic per-frame uniform updates are the caller's job: write the
-        /// `vertUniform` / `fragUniform` fields (or field setters)
+        /// Resolves a vertex defines field id by name with a type check.
+        pub fn getVertDefinesFieldId(comptime field_name: []const u8, comptime F: type) ?u32 {
+            return (comptime gpu_meta.uniformFields(Vert.EnumDefines)).getId(field_name, F);
+        }
+
+        /// Writes one vertex defines field by id.
+        pub fn setVertDefinesData(self: *Self, field_id: u32, data: anytype) UniformFieldError!void {
+            try writeUniformField(Vert.EnumDefines, &self.vertDefines, field_id, data);
+        }
+
+        /// Reads one vertex defines field by id.
+        pub fn getVertDefinesData(self: *Self, field_id: u32, comptime T: type) UniformFieldError!T {
+            return readUniformField(Vert.EnumDefines, &self.vertDefines, field_id, T);
+        }
+
+        /// Resolves a fragment defines field id by name with a type check.
+        pub fn getFragDefinesFieldId(comptime field_name: []const u8, comptime F: type) ?u32 {
+            return (comptime gpu_meta.uniformFields(Frag.EnumDefines)).getId(field_name, F);
+        }
+
+        /// Writes one fragment defines field by id.
+        pub fn setFragDefinesData(self: *Self, field_id: u32, data: anytype) UniformFieldError!void {
+            try writeUniformField(Frag.EnumDefines, &self.fragDefines, field_id, data);
+        }
+
+        /// Reads one fragment defines field by id.
+        pub fn getFragDefinesData(self: *Self, field_id: u32, comptime T: type) UniformFieldError!T {
+            return readUniformField(Frag.EnumDefines, &self.fragDefines, field_id, T);
+        }
+
+        /// Binds the program variant for the cached defines and uploads uniforms.
+        /// Compiles the variant on first call for this defines combination.
+        /// Dynamic per-frame updates are the caller's job: write the
+        /// `vertUniform` / `fragUniform` / `vertDefines` / `fragDefines` fields
         /// before calling `use`, e.g. from an explicit ECS system.
         /// Parameters:
         /// - self: material pointer.
+        /// - allocator: allocator for variant compilation.
         ///
         /// Returns: void.
-        pub fn use(self: *Self) void {
-            Prog.use();
-            uploadVertUniform(Prog, self.vertUniform);
-            uploadFragUniform(Prog, self.fragUniform);
+        pub fn use(self: *Self, allocator: std.mem.Allocator) !void {
+            const program = try Prog.instance(allocator, self.vertDefines, self.fragDefines);
+            @import("gl").programs.use(program);
+            uploadVertUniform(Prog, program, self.vertUniform);
+            uploadFragUniform(Prog, program, self.fragUniform);
         }
 
         /// Wraps this material as a type-erased `AnyMaterial`.
@@ -279,7 +321,7 @@ pub fn Material(
 /// ```zig
 /// const M = VertexMaterial(MyVert.Uniform, .{ .uMvp = mvp });
 /// var m: M = .{};
-/// m.use();
+/// try m.use(allocator);
 /// ```
 pub fn VertexMaterial(comptime vert_uniform: type, comptime vert_uniform_value: vert_uniform) type {
     const Vert = checkShaderOwner(vert_uniform, "vert_uniform");
@@ -297,6 +339,8 @@ pub fn VertexMaterial(comptime vert_uniform: type, comptime vert_uniform_value: 
 
         /// Cached vertex uniform values (defaults from `vert_uniform_value`).
         vertUniform: vert_uniform = vert_uniform_value,
+        /// Cached vertex defines (defaults from the single `#define`s).
+        vertDefines: Vert.EnumDefines = .{},
 
         /// Errors for name/id based uniform field access.
         pub const UniformFieldError = gpu_meta.ResourceError;
@@ -310,6 +354,21 @@ pub fn VertexMaterial(comptime vert_uniform: type, comptime vert_uniform_value: 
         /// Returns: field id, or null when the field is missing or the type differs.
         pub fn getVertUniformFieldId(comptime field_name: []const u8, comptime F: type) ?u32 {
             return (comptime gpu_meta.uniformFields(vert_uniform)).getId(field_name, F);
+        }
+
+        /// Resolves a vertex defines field id by name with a type check.
+        pub fn getVertDefinesFieldId(comptime field_name: []const u8, comptime F: type) ?u32 {
+            return (comptime gpu_meta.uniformFields(Vert.EnumDefines)).getId(field_name, F);
+        }
+
+        /// Writes one vertex defines field by id.
+        pub fn setVertDefinesData(self: *Self, field_id: u32, data: anytype) UniformFieldError!void {
+            try writeUniformField(Vert.EnumDefines, &self.vertDefines, field_id, data);
+        }
+
+        /// Reads one vertex defines field by id.
+        pub fn getVertDefinesData(self: *Self, field_id: u32, comptime T: type) UniformFieldError!T {
+            return readUniformField(Vert.EnumDefines, &self.vertDefines, field_id, T);
         }
 
         /// Writes one vertex uniform field by id.
@@ -334,16 +393,16 @@ pub fn VertexMaterial(comptime vert_uniform: type, comptime vert_uniform_value: 
             return readUniformField(vert_uniform, &self.vertUniform, field_id, T);
         }
 
-        /// Binds the program and uploads the vertex uniform via editor.
-        /// Dynamic per-frame updates are the caller's job: write the
-        /// `vertUniform` field (or field setters) before calling `use`.
+        /// Binds the program variant for the cached defines and uploads the vertex uniform.
         /// Parameters:
         /// - self: material pointer.
+        /// - allocator: allocator for variant compilation.
         ///
         /// Returns: void.
-        pub fn use(self: *Self) void {
-            Prog.use();
-            uploadVertUniform(Prog, self.vertUniform);
+        pub fn use(self: *Self, allocator: std.mem.Allocator) !void {
+            const program = try Prog.instance(allocator, self.vertDefines);
+            @import("gl").programs.use(program);
+            uploadVertUniform(Prog, program, self.vertUniform);
         }
 
         /// Wraps this vertex-only material as a type-erased `AnyMaterial`.
@@ -361,6 +420,16 @@ pub fn VertexMaterial(comptime vert_uniform: type, comptime vert_uniform_value: 
 
 // File-scope doubles: `Owner` forward-references require container scope
 // (function-local forward refs are rejected), mirroring generated shaders.
+const DummyVertMode = enum {
+    _0,
+    _1,
+    pub fn text(self: @This()) []const u8 {
+        return switch (self) {
+            ._0 => "0",
+            ._1 => "1",
+        };
+    }
+};
 const DummyVertUniform = struct {
     pub const Owner = DummyVert;
     uA: f32,
@@ -369,6 +438,10 @@ const DummyVertUniform = struct {
 const DummyVert = struct {
     pub const Uniform = DummyVertUniform;
     pub const IdCache = struct { uA: i32, uB: i32 };
+    pub const MODE = DummyVertMode;
+    pub const EnumDefines = struct {
+        MODE: MODE = ._0,
+    };
     pub const Editor = struct {
         pub fn setUniform(self: *@This(), u: Uniform) *@This() {
             _ = u;
@@ -378,9 +451,10 @@ const DummyVert = struct {
             _ = self;
         }
     };
-    pub fn instance() u32 {
+    pub fn instance(_: std.mem.Allocator, _: EnumDefines) !u32 {
         return 0;
     }
+    pub fn destroy(_: std.mem.Allocator) void {}
     pub fn edit(_: u32) Editor {
         return .{};
     }
@@ -392,6 +466,7 @@ const DummyFragUniform = struct {
 const DummyFrag = struct {
     pub const Uniform = DummyFragUniform;
     pub const IdCache = struct { uC: i32 };
+    pub const EnumDefines = struct {};
     pub const Editor = struct {
         pub fn setUniform(self: *@This(), u: Uniform) *@This() {
             _ = u;
@@ -401,9 +476,10 @@ const DummyFrag = struct {
             _ = self;
         }
     };
-    pub fn instance() u32 {
+    pub fn instance(_: std.mem.Allocator, _: EnumDefines) !u32 {
         return 0;
     }
+    pub fn destroy(_: std.mem.Allocator) void {}
     pub fn edit(_: u32) Editor {
         return .{};
     }
@@ -462,6 +538,18 @@ test "vertex material from uniform type and default" {
 
     try std.testing.expect(MV.getVertUniformFieldId("nope", f32) == null);
     try std.testing.expectError(error.UnknownFieldId, self.getVertUniformData(99, f32));
+}
+
+test "material defines default and field access" {
+    const M = Material(DummyVert.Uniform, .{ .uA = 1.0, .uB = 2 }, DummyFrag.Uniform, .{ .uC = 3 });
+    var self: M = .{};
+    try std.testing.expectEqual(DummyVertMode._0, self.vertDefines.MODE);
+    const did = M.getVertDefinesFieldId("MODE", DummyVertMode) orelse unreachable;
+    try self.setVertDefinesData(did, DummyVertMode._1);
+    try std.testing.expectEqual(DummyVertMode._1, try self.getVertDefinesData(did, DummyVertMode));
+    try std.testing.expectEqual(DummyVertMode._1, self.vertDefines.MODE);
+    try std.testing.expect(M.getVertDefinesFieldId("NOPE", DummyVertMode) == null);
+    try std.testing.expectError(error.UnknownFieldId, self.getVertDefinesData(99, DummyVertMode));
 }
 
 test "asAnyMaterial roundtrips through AnyMaterial without GL" {

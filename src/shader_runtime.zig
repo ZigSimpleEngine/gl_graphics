@@ -178,6 +178,53 @@ pub fn applyUniforms(
     inline for (@typeInfo(DirtyT).@"struct".fields) |f| @field(dirty, f.name) = false;
 }
 
+/// Byte slot of one `ENUM_*` default token inside `template_src`.
+/// Generated per shader (`define_slots`), field order == slot order.
+pub const DefineSlot = struct {
+    /// Byte offset of the default token in the template.
+    offset: usize,
+    /// Byte length of the default token in the template.
+    len: usize,
+};
+
+/// Builds one shader variant source by splicing `texts` into `template`.
+/// `slots` must be sorted by ascending `offset` (generator guarantees
+/// field/offset order); `texts[i]` replaces `template[slots[i]]`.
+/// Parameters:
+/// - allocator: allocator for the result.
+/// - template: full inlined GLSL with default tokens.
+/// - slots: token slots to replace.
+/// - texts: replacement texts (`EnumDefines` tag `text()`), same length as slots.
+///
+/// Returns: newly allocated variant source (caller frees).
+pub fn buildVariantSrc(
+    allocator: std.mem.Allocator,
+    template: []const u8,
+    slots: []const DefineSlot,
+    texts: []const []const u8,
+) ![]u8 {
+    std.debug.assert(slots.len == texts.len);
+    var total: usize = template.len;
+    for (slots, texts) |s, t| total = total - s.len + t.len;
+    var out = try allocator.alloc(u8, total);
+    errdefer allocator.free(out);
+    var src_pos: usize = 0;
+    var dst_pos: usize = 0;
+    for (slots, texts) |s, t| {
+        std.debug.assert(s.offset + s.len <= template.len);
+        std.debug.assert(s.offset >= src_pos);
+        const chunk = template[src_pos..s.offset];
+        @memcpy(out[dst_pos .. dst_pos + chunk.len], chunk);
+        dst_pos += chunk.len;
+        @memcpy(out[dst_pos .. dst_pos + t.len], t);
+        dst_pos += t.len;
+        src_pos = s.offset + s.len;
+    }
+    const tail = template[src_pos..];
+    @memcpy(out[dst_pos .. dst_pos + tail.len], tail);
+    return out;
+}
+
 /// Creates a shader of the given kind, loads and compiles `src` into it.
 /// Parameters:
 /// - kind: shader stage type.
@@ -318,6 +365,43 @@ pub fn uploadUniformByKind(loc: i32, kind: gpu_meta.UniformKind, bytes: []const 
         },
         .other => return error.UnsupportedUniformField,
     }
+}
+
+test "enum defines key is hashable for variants" {
+    const MODE = enum {
+        _0,
+        _1,
+        TRUE,
+        pub fn text(self: @This()) []const u8 {
+            return switch (self) {
+                ._0 => "0",
+                ._1 => "1",
+                .TRUE => "TRUE",
+            };
+        }
+    };
+    const Defines = struct { MODE: MODE = ._0 };
+    const alloc = std.testing.allocator;
+    var map: std.AutoHashMapUnmanaged(Defines, u32) = .empty;
+    defer map.deinit(alloc);
+    try map.put(alloc, .{}, 7);
+    try std.testing.expectEqual(@as(u32, 7), map.get(.{}) orelse 0);
+    try std.testing.expectEqualStrings("1", (Defines{ .MODE = ._1 }).MODE.text());
+}
+
+test "buildVariantSrc splices texts into slots" {
+    const alloc = std.testing.allocator;
+    const template = "#define ENUM_MODE 0\n#if ENUM_MODE == 1\n#endif\n";
+    const tok_off = std.mem.indexOf(u8, template, "0").?;
+    const slots = [_]DefineSlot{.{ .offset = tok_off, .len = 1 }};
+    const texts = [_][]const u8{"1"};
+    const out = try buildVariantSrc(alloc, template, &slots, &texts);
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("#define ENUM_MODE 1\n#if ENUM_MODE == 1\n#endif\n", out);
+    const texts2 = [_][]const u8{"OTHER"};
+    const out2 = try buildVariantSrc(alloc, template, &slots, &texts2);
+    defer alloc.free(out2);
+    try std.testing.expect(std.mem.indexOf(u8, out2, "#define ENUM_MODE OTHER") != null);
 }
 
 test "shader runtime decls analyze" {

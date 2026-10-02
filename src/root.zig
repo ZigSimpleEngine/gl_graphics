@@ -57,6 +57,8 @@ pub const flattenUniforms = shader_runtime.flattenUniforms;
 pub const applyUniforms = shader_runtime.applyUniforms;
 pub const compileShaderSource = shader_runtime.compileShaderSource;
 pub const disposeShader = shader_runtime.disposeShader;
+pub const DefineSlot = shader_runtime.DefineSlot;
+pub const buildVariantSrc = shader_runtime.buildVariantSrc;
 
 /// Asset descriptors for generating Zig code from GLSL.
 pub const descriptors = struct {
@@ -95,11 +97,11 @@ const DummyVert = struct {
     pub const Vertex = struct { pos: math.Vec(3, f32) };
     pub const Uniform = DummyVertUniform;
     pub const IdCache = struct { uMvp: i32 };
-    pub var id: u32 = 0;
-    pub fn instance() u32 {
+    pub const EnumDefines = struct {};
+    pub fn instance(_: std.mem.Allocator, _: EnumDefines) !u32 {
         return 1;
     }
-    pub fn dispose() void {}
+    pub fn destroy(_: std.mem.Allocator) void {}
     pub const Editor = struct {
         _program: u32,
         pub fn init(p: u32) @This() {
@@ -128,11 +130,11 @@ const DummyFragUniform = struct {
 const DummyFrag = struct {
     pub const Uniform = DummyFragUniform;
     pub const IdCache = struct { uColor: i32 };
-    pub var id: u32 = 0;
-    pub fn instance() u32 {
+    pub const EnumDefines = struct {};
+    pub fn instance(_: std.mem.Allocator, _: EnumDefines) !u32 {
         return 2;
     }
-    pub fn dispose() void {}
+    pub fn destroy(_: std.mem.Allocator) void {}
     pub const Editor = struct {
         _program: u32,
         pub fn init(p: u32) @This() {
@@ -239,9 +241,9 @@ test "descriptor bake integration" {
 test "mesh editor chain const" {
     const V = struct { pos: math.Vec(3, f32) };
     const M = Mesh(V);
-    const gpa = std.testing.allocator;
-    const mesh = try M.create(gpa);
-    defer mesh.destroy(gpa);
+    const allocator = std.testing.allocator;
+    const mesh = try M.create(allocator);
+    defer mesh.destroy(allocator);
     const verts = [_]V{ .{ .pos = math.Vec(3, f32).zero() } };
     mesh.edit().setVertices(verts[0..]).apply();
     const inds = [_]u16{0};
@@ -255,9 +257,9 @@ test "mesh editor soa chain" {
         uv: math.Vec(2, f32),
     };
     const M = Mesh(V);
-    const gpa = std.testing.allocator;
-    const mesh = try M.create(gpa);
-    defer mesh.destroy(gpa);
+    const allocator = std.testing.allocator;
+    const mesh = try M.create(allocator);
+    defer mesh.destroy(allocator);
     const pos = [_]math.Vec(3, f32){ math.Vec(3, f32).init(.{ 0, 0, 0 }), math.Vec(3, f32).init(.{ 1, 0, 0 }) };
     const normal = [_]math.Vec(3, f32){ math.Vec(3, f32).init(.{ 0, 0, 1 }), math.Vec(3, f32).init(.{ 0, 0, 1 }) };
     const uv = [_]math.Vec(2, f32){ math.Vec(2, f32).init(.{ 0, 0 }), math.Vec(2, f32).init(.{ 1, 1 }) };
@@ -268,27 +270,27 @@ test "mesh editor soa chain" {
 }
 
 test "texture editor chain const" {
-    const gpa = std.testing.allocator;
-    const tex = try Texture.create(gpa);
-    defer tex.destroy(gpa);
+    const allocator = std.testing.allocator;
+    const tex = try Texture.create(allocator);
+    defer tex.destroy(allocator);
     tex.edit().setMinFilter(.linear).setMagFilter(.linear).setWrap(.repeat, .repeat).apply();
     tex.edit().setWrapS(.clamp_to_edge).setWrapT(.clamp_to_edge).setSwizzle(.red, .green, .blue, .alpha).apply();
 }
 
 test "buffer editor chain const" {
     const B = Buffer(f32);
-    const gpa = std.testing.allocator;
-    const buf = try B.create(gpa);
-    defer buf.destroy(gpa);
+    const allocator = std.testing.allocator;
+    const buf = try B.create(allocator);
+    defer buf.destroy(allocator);
     const data = [_]f32{ 1, 2, 3 };
     buf.edit().setData(data[0..], .static_draw).apply();
     buf.edit().setSubDataTyped(0, data[0..]).apply();
 }
 
 test "framebuffer and camera cached paths without GL" {
-    const gpa = std.testing.allocator;
-    const fb = try Framebuffer.create(gpa);
-    defer fb.destroy(gpa);
+    const allocator = std.testing.allocator;
+    const fb = try Framebuffer.create(allocator);
+    defer fb.destroy(allocator);
     try std.testing.expectEqual(@as(u32, 1), fb.getId());
     _ = fb.getTarget();
     _ = fb.getWidth();
@@ -315,8 +317,8 @@ test "framebuffer and camera cached paths without GL" {
     _ = &Framebuffer.isValid;
 
     const C = Camera(f32);
-    const cam = try C.create(gpa);
-    defer cam.destroy(gpa);
+    const cam = try C.create(allocator);
+    defer cam.destroy(allocator);
     _ = cam.getFovY();
     _ = cam.getAspect();
     _ = cam.getNear();

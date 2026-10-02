@@ -250,7 +250,6 @@ pub const VertexDescriptor = struct {
         try inner.appendSlice(allocator, "\n");
 
         try common.appendEnumDefinesCode(allocator, &inner, enum_defs, combined_slice);
-        try common.appendShaderDataTypesCode(allocator, &inner);
         try inner.appendSlice(allocator, "    var variants: @import(\"std\").AutoHashMapUnmanaged(Define, u32) = .empty;\n\n");
 
         try inner.appendSlice(allocator, "    pub const BufferBlocks = struct {\n");

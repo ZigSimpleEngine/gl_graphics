@@ -36,12 +36,6 @@ pub const VertexMaterial = @import("material.zig").VertexMaterial;
 /// Compile-time type metadata for resource abstractions (no GL dependency).
 pub const gpu_meta = @import("gpu_meta.zig");
 
-/// Per-shader type bundle (`Uniform` + `Define`), see `gpu_meta`.
-pub const ShaderDataTypes = gpu_meta.ShaderDataTypes;
-
-/// Per-shader value bundle type constructor, see `gpu_meta`.
-pub const ShaderDataValues = gpu_meta.ShaderDataValues;
-
 /// Type-erased GPU resource records (AnyBuffer/AnyMesh/AnyProgram/AnyMaterial).
 pub const handles = @import("handles.zig");
 pub const AnyBuffer = handles.AnyBuffer;
@@ -104,8 +98,6 @@ const DummyVert = struct {
     pub const Uniform = DummyVertUniform;
     pub const IdCache = struct { uMvp: i32 };
     pub const Define = struct {};
-    pub const DataTypes: ShaderDataTypes = .{ .Uniform = Uniform, .Define = Define };
-    pub const DataValue = ShaderDataValues(DataTypes);
     pub fn instance(_: std.mem.Allocator, _: Define) !u32 {
         return 1;
     }
@@ -139,8 +131,6 @@ const DummyFrag = struct {
     pub const Uniform = DummyFragUniform;
     pub const IdCache = struct { uColor: i32 };
     pub const Define = struct {};
-    pub const DataTypes: ShaderDataTypes = .{ .Uniform = Uniform, .Define = Define };
-    pub const DataValue = ShaderDataValues(DataTypes);
     pub fn instance(_: std.mem.Allocator, _: Define) !u32 {
         return 2;
     }
@@ -171,10 +161,10 @@ test "smoke — texture opaque + editor chain" {
     _ = Map(.my_map, struct { a: i32 });
     _ = ShaderProgram(DummyVert, DummyFrag);
     _ = VertexProgram(DummyVert);
-    const DummyMat = Material(DummyVert.DataTypes, .{ .uniform_value = .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, .define_value = .{} }, DummyFrag.DataTypes, .{ .uniform_value = .{ .uColor = math.Vec(4, f32).zero() }, .define_value = .{} });
+    const DummyMat = Material(DummyVertUniform, DummyVert.Define, .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uColor = math.Vec(4, f32).zero() }, .{});
     const dummy_mat: DummyMat = .{};
     _ = dummy_mat;
-    const DummyVertMat = VertexMaterial(DummyVert.DataTypes, .{ .uniform_value = .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, .define_value = .{} });
+    const DummyVertMat = VertexMaterial(DummyVertUniform, DummyVert.Define, .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, .{});
     const dummy_vert_mat: DummyVertMat = .{};
     _ = dummy_vert_mat;
     _ = Framebuffer;

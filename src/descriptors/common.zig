@@ -1329,17 +1329,6 @@ pub fn validateStructMembers(
     }
 }
 
-/// Emits the per-shader type/value bundle used by `Material`:
-/// `pub const DataTypes: ShaderDataTypes = .{ .Uniform, .Define }` plus
-/// `pub const DataValue = ShaderDataValues(DataTypes)`.
-pub fn appendShaderDataTypesCode(
-    allocator: std.mem.Allocator,
-    inner: *std.ArrayList(u8),
-) !void {
-    try inner.appendSlice(allocator, "    pub const DataTypes: @import(\"gl_graphics\").ShaderDataTypes = .{ .Uniform = Uniform, .Define = Define };\n");
-    try inner.appendSlice(allocator, "    pub const DataValue = @import(\"gl_graphics\").ShaderDataValues(DataTypes);\n\n");
-}
-
 /// Generates Zig declarations for `ENUM_` variants into `inner`:
 /// one `pub const <SUFFIX>` enum per define (with `text()` returning the
 /// original GLSL token), `pub const Define` with defaults from the

@@ -1,4 +1,4 @@
-﻿/// Standard library import.
+/// Standard library import.
 const std = @import("std");
 /// Text utilities from assets_manager.
 const text_utils = @import("assets_manager").text_utils;
@@ -1133,7 +1133,7 @@ pub fn parseEnumDefines(allocator: std.mem.Allocator, combined: []const u8) ![]E
             const left = if (l_start < l_end) std.mem.trim(u8, cleaned[l_start..l_end], &[_]u8{ ' ', '\t', '(', ')' }) else "";
             const right = if (r_start < r_end) cleaned[r_start..r_end] else "";
             const enum_side: ?[]const u8 = if (std.mem.startsWith(u8, left, "ENUM_")) left else if (std.mem.startsWith(u8, right, "ENUM_")) right else null;
-            const other_side: []const u8 = if (enum_side == null) "" else if (enum_side.? .ptr == left.ptr) right else left;
+            const other_side: []const u8 = if (enum_side == null) "" else if (enum_side.?.ptr == left.ptr) right else left;
             s = r_end + 1;
             const ename = enum_side orelse continue;
             if (!isIdentToken(ename) or !std.mem.startsWith(u8, ename, "ENUM_")) continue;
@@ -1329,9 +1329,20 @@ pub fn validateStructMembers(
     }
 }
 
+/// Emits the per-shader type/value bundle used by `Material`:
+/// `pub const DataTypes: ShaderDataTypes = .{ .Uniform, .Define }` plus
+/// `pub const DataValue = ShaderDataValues(DataTypes)`.
+pub fn appendShaderDataTypesCode(
+    allocator: std.mem.Allocator,
+    inner: *std.ArrayList(u8),
+) !void {
+    try inner.appendSlice(allocator, "    pub const DataTypes: @import(\"gl_graphics\").ShaderDataTypes = .{ .Uniform = Uniform, .Define = Define };\n");
+    try inner.appendSlice(allocator, "    pub const DataValue = @import(\"gl_graphics\").ShaderDataValues(DataTypes);\n\n");
+}
+
 /// Generates Zig declarations for `ENUM_` variants into `inner`:
 /// one `pub const <SUFFIX>` enum per define (with `text()` returning the
-/// original GLSL token), `pub const EnumDefines` with defaults from the
+/// original GLSL token), `pub const Define` with defaults from the
 /// single `#define`, plus `template_src` (full inlined GLSL, comments kept)
 /// and `define_slots` (`{offset,len}` of each default token, field order).
 /// `template_src` must be the exact `combined` slice the offsets refer to.
@@ -1365,9 +1376,9 @@ pub fn appendEnumDefinesCode(
         try inner.appendSlice(allocator, "    };\n\n");
     }
     if (enum_defs.len == 0) {
-        try inner.appendSlice(allocator, "    pub const EnumDefines = struct {};\n\n");
+        try inner.appendSlice(allocator, "    pub const Define = struct {};\n\n");
     } else {
-        try inner.appendSlice(allocator, "    pub const EnumDefines = struct {\n");
+        try inner.appendSlice(allocator, "    pub const Define = struct {\n");
         for (enum_defs) |d| {
             try inner.appendSlice(allocator, "        ");
             try inner.appendSlice(allocator, d.field);
@@ -1624,7 +1635,7 @@ test "enum defines codegen emits template and slots" {
     const code = try inner.toOwnedSlice(alloc);
     defer alloc.free(code);
     try std.testing.expect(std.mem.indexOf(u8, code, "pub const MODE = enum") != null);
-    try std.testing.expect(std.mem.indexOf(u8, code, "pub const EnumDefines = struct") != null);
+    try std.testing.expect(std.mem.indexOf(u8, code, "pub const Define = struct") != null);
     try std.testing.expect(std.mem.indexOf(u8, code, "template_src") != null);
     try std.testing.expect(std.mem.indexOf(u8, code, "define_slots") != null);
     try std.testing.expect(std.mem.indexOf(u8, code, "_0") != null);

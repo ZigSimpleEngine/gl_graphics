@@ -367,6 +367,28 @@ pub fn readField(base: *const anyopaque, desc: UniformFieldDesc, want_type_id: u
     @memcpy(out[0..desc.size], src[0..desc.size]);
 }
 
+/// Per-shader type bundle: which `Uniform` and which `Define` belong together.
+/// Shaders expose it as `pub const DataTypes: ShaderDataTypes = .{ .Uniform = Uniform, .Define = Define }`.
+/// `Material`/`VertexMaterial` take one such bundle (+ its values) per stage.
+pub const ShaderDataTypes = struct {
+    /// Uniform struct type (must declare `pub const Owner`).
+    Uniform: type,
+    /// Defines struct type (the shader's `Define`).
+    Define: type,
+};
+
+/// Per-shader value bundle type for a given `ShaderDataTypes`.
+/// Shaders expose it as `pub const DataValue = ShaderDataValues(DataTypes)`;
+/// `Material`/`VertexMaterial` take one value of this type per stage as defaults.
+pub fn ShaderDataValues(comptime data_types: ShaderDataTypes) type {
+    return struct {
+        /// Default uniform value.
+        uniform_value: data_types.Uniform,
+        /// Default defines value.
+        define_value: data_types.Define,
+    };
+}
+
 test "describe struct and scalars" {
     const S = struct { a: f32, b: u16 };
     const d = comptime describe(S);

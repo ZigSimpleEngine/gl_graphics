@@ -250,7 +250,8 @@ pub const VertexDescriptor = struct {
         try inner.appendSlice(allocator, "\n");
 
         try common.appendEnumDefinesCode(allocator, &inner, enum_defs, combined_slice);
-        try inner.appendSlice(allocator, "    var variants: @import(\"std\").AutoHashMapUnmanaged(EnumDefines, u32) = .empty;\n\n");
+        try common.appendShaderDataTypesCode(allocator, &inner);
+        try inner.appendSlice(allocator, "    var variants: @import(\"std\").AutoHashMapUnmanaged(Define, u32) = .empty;\n\n");
 
         try inner.appendSlice(allocator, "    pub const BufferBlocks = struct {\n");
         var bind_point: usize = 0;
@@ -314,7 +315,7 @@ pub const VertexDescriptor = struct {
         try inner.appendSlice(allocator, "        }\n");
         try inner.appendSlice(allocator, "    };\n\n");
 
-        try inner.appendSlice(allocator, "    pub fn instance(allocator: @import(\"std\").mem.Allocator, defines: EnumDefines) !u32 {\n");
+        try inner.appendSlice(allocator, "    pub fn instance(allocator: @import(\"std\").mem.Allocator, defines: Define) !u32 {\n");
         try inner.appendSlice(allocator, "        if (variants.get(defines)) |sid| return sid;\n");
         if (enum_defs.len == 0) {
             try inner.appendSlice(allocator, "        const src = template_src;\n");
@@ -362,9 +363,7 @@ pub const VertexDescriptor = struct {
         const uniform_outer_slice = try uniform_outer.toOwnedSlice(allocator);
         defer allocator.free(uniform_outer_slice);
 
-        const outer = try std.fmt.allocPrint(allocator,
-            "{s}{s}\n{s}pub const {s} = struct {{\n{s}{s}{s}}};\n",
-            .{ prefix orelse "", uniform_outer_slice, prefix orelse "", var_name, inner_slice, if (inner_slice.len > 0 and inner_slice[inner_slice.len - 1] == '\n') "" else "\n", prefix orelse "" });
+        const outer = try std.fmt.allocPrint(allocator, "{s}{s}\n{s}pub const {s} = struct {{\n{s}{s}{s}}};\n", .{ prefix orelse "", uniform_outer_slice, prefix orelse "", var_name, inner_slice, if (inner_slice.len > 0 and inner_slice[inner_slice.len - 1] == '\n') "" else "\n", prefix orelse "" });
         return outer;
     }
 

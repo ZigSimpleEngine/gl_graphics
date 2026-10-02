@@ -236,7 +236,7 @@ pub const DefineSlot = struct {
 /// - allocator: allocator for the result.
 /// - template: full inlined GLSL with default tokens.
 /// - slots: token slots to replace.
-/// - texts: replacement texts (`EnumDefines` tag `text()`), same length as slots.
+/// - texts: replacement texts (`Define` tag `text()`), same length as slots.
 ///
 /// Returns: newly allocated variant source (caller frees).
 pub fn buildVariantSrc(
@@ -451,10 +451,10 @@ test "generated nullable uniform shape with variant splice" {
             uMvp: f32 = @import("std").mem.zeroes(f32),
             uTex: ?*const Texture = null,
         };
-        pub const EnumDefines = struct {};
+        pub const Define = struct {};
         const template_src: []const u8 = "#define ENUM_MODE 0\nuniform sampler2D uTex;\n";
         const define_slots = [_]DefineSlot{.{ .offset = 18, .len = 1 }};
-        var variants: std.AutoHashMapUnmanaged(EnumDefines, u32) = .empty;
+        var variants: std.AutoHashMapUnmanaged(Define, u32) = .empty;
     };
     const alloc = std.testing.allocator;
     const u: FakeShader.Uniform = .{};
@@ -466,7 +466,7 @@ test "generated nullable uniform shape with variant splice" {
     const src = try buildVariantSrc(alloc, FakeShader.template_src, &FakeShader.define_slots, &texts);
     defer alloc.free(src);
     try std.testing.expectEqualStrings("#define ENUM_MODE 1\nuniform sampler2D uTex;\n", src);
-    var map: std.AutoHashMapUnmanaged(FakeShader.EnumDefines, u32) = .empty;
+    var map: std.AutoHashMapUnmanaged(FakeShader.Define, u32) = .empty;
     defer map.deinit(alloc);
     try map.put(alloc, .{}, 11);
     try std.testing.expectEqual(@as(u32, 11), map.get(.{}) orelse 0);

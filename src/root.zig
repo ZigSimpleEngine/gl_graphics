@@ -36,6 +36,12 @@ pub const VertexMaterial = @import("material.zig").VertexMaterial;
 /// Compile-time type metadata for resource abstractions (no GL dependency).
 pub const gpu_meta = @import("gpu_meta.zig");
 
+/// Per-shader type bundle (`Uniform` + `Define`), see `gpu_meta`.
+pub const ShaderDataTypes = gpu_meta.ShaderDataTypes;
+
+/// Per-shader value bundle type constructor, see `gpu_meta`.
+pub const ShaderDataValues = gpu_meta.ShaderDataValues;
+
 /// Type-erased GPU resource records (AnyBuffer/AnyMesh/AnyProgram/AnyMaterial).
 pub const handles = @import("handles.zig");
 pub const AnyBuffer = handles.AnyBuffer;
@@ -97,8 +103,10 @@ const DummyVert = struct {
     pub const Vertex = struct { pos: math.Vec(3, f32) };
     pub const Uniform = DummyVertUniform;
     pub const IdCache = struct { uMvp: i32 };
-    pub const EnumDefines = struct {};
-    pub fn instance(_: std.mem.Allocator, _: EnumDefines) !u32 {
+    pub const Define = struct {};
+    pub const DataTypes: ShaderDataTypes = .{ .Uniform = Uniform, .Define = Define };
+    pub const DataValue = ShaderDataValues(DataTypes);
+    pub fn instance(_: std.mem.Allocator, _: Define) !u32 {
         return 1;
     }
     pub fn destroy(_: std.mem.Allocator) void {}
@@ -130,8 +138,10 @@ const DummyFragUniform = struct {
 const DummyFrag = struct {
     pub const Uniform = DummyFragUniform;
     pub const IdCache = struct { uColor: i32 };
-    pub const EnumDefines = struct {};
-    pub fn instance(_: std.mem.Allocator, _: EnumDefines) !u32 {
+    pub const Define = struct {};
+    pub const DataTypes: ShaderDataTypes = .{ .Uniform = Uniform, .Define = Define };
+    pub const DataValue = ShaderDataValues(DataTypes);
+    pub fn instance(_: std.mem.Allocator, _: Define) !u32 {
         return 2;
     }
     pub fn destroy(_: std.mem.Allocator) void {}
@@ -161,10 +171,10 @@ test "smoke — texture opaque + editor chain" {
     _ = Map(.my_map, struct { a: i32 });
     _ = ShaderProgram(DummyVert, DummyFrag);
     _ = VertexProgram(DummyVert);
-    const DummyMat = Material(DummyVert.Uniform, .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, DummyFrag.Uniform, .{ .uColor = math.Vec(4, f32).zero() });
+    const DummyMat = Material(DummyVert.DataTypes, .{ .uniform_value = .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, .define_value = .{} }, DummyFrag.DataTypes, .{ .uniform_value = .{ .uColor = math.Vec(4, f32).zero() }, .define_value = .{} });
     const dummy_mat: DummyMat = .{};
     _ = dummy_mat;
-    const DummyVertMat = VertexMaterial(DummyVert.Uniform, .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) });
+    const DummyVertMat = VertexMaterial(DummyVert.DataTypes, .{ .uniform_value = .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, .define_value = .{} });
     const dummy_vert_mat: DummyVertMat = .{};
     _ = dummy_vert_mat;
     _ = Framebuffer;
@@ -244,7 +254,7 @@ test "mesh editor chain const" {
     const allocator = std.testing.allocator;
     const mesh = try M.create(allocator);
     defer mesh.destroy(allocator);
-    const verts = [_]V{ .{ .pos = math.Vec(3, f32).zero() } };
+    const verts = [_]V{.{ .pos = math.Vec(3, f32).zero() }};
     mesh.edit().setVertices(verts[0..]).apply();
     const inds = [_]u16{0};
     mesh.edit().setVertices(verts[0..]).setIndices(inds[0..]).apply();

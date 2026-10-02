@@ -859,9 +859,9 @@ pub const AnyProgram = struct {
     vert_fields: gpu_meta.UniformFields,
     /// Fragment uniform field table (static hash map + descriptors, `field_id` == index).
     frag_fields: gpu_meta.UniformFields,
-    /// Vertex `EnumDefines` description (empty struct when no flags).
+    /// Vertex `Define` description (empty struct when no flags).
     vert_defines: gpu_meta.TypeDesc,
-    /// Fragment `EnumDefines` description (empty when no fragment stage/flags).
+    /// Fragment `Define` description (empty when no fragment stage/flags).
     frag_defines: gpu_meta.TypeDesc,
     /// Vertex defines field table (`field_id` == index).
     vert_defines_fields: gpu_meta.UniformFields,
@@ -1154,7 +1154,6 @@ pub const AnyProgram = struct {
     }
 };
 
-
 /// Type-erased view over a `Material` or `VertexMaterial` plain struct
 /// (via `wrap` and `wrapVertex` respectively).
 ///
@@ -1207,9 +1206,9 @@ pub const AnyMaterial = struct {
     vert_fields: gpu_meta.UniformFields,
     /// Fragment uniform field table (static hash map + descriptors, empty when no fragment stage).
     frag_fields: gpu_meta.UniformFields,
-    /// Vertex `EnumDefines` description.
+    /// Vertex `Define` description.
     vert_defines: gpu_meta.TypeDesc,
-    /// Fragment `EnumDefines` description (empty when no fragment stage).
+    /// Fragment `Define` description (empty when no fragment stage).
     frag_defines: gpu_meta.TypeDesc,
     /// Vertex defines field table.
     vert_defines_fields: gpu_meta.UniformFields,
@@ -1819,18 +1818,18 @@ test "mesh/program/material compatibility on fabricated records" {
 const FakeVertP = struct {
     pub const Vertex = struct { aPos: [3]f32 };
     pub const Uniform = struct { uScale: f32, uTex: *const u8 };
-    pub const EnumDefines = struct {};
+    pub const Define = struct {};
 };
 const FakeFragP = struct {
     pub const Uniform = struct { uColor: f32 };
-    pub const EnumDefines = struct {};
+    pub const Define = struct {};
 };
 const FakeProgramP = struct {
     pub const HasFrag = true;
     pub const Vert = FakeVertP;
     pub const Frag = FakeFragP;
-    pub const VertDefines = FakeVertP.EnumDefines;
-    pub const FragDefines = FakeFragP.EnumDefines;
+    pub const VertDefines = FakeVertP.Define;
+    pub const FragDefines = FakeFragP.Define;
     pub const ProgramDefines = struct { vert: VertDefines, frag: FragDefines };
     pub const Variant = struct { prog_id: u32 };
     var id: u32 = 42;
@@ -1848,7 +1847,7 @@ const FakeProgramP = struct {
 const FakeProgramNoFrag = struct {
     pub const HasFrag = false;
     pub const Vert = FakeVertP;
-    pub const VertDefines = FakeVertP.EnumDefines;
+    pub const VertDefines = FakeVertP.Define;
     pub const ProgramDefines = VertDefines;
     pub const Variant = struct { prog_id: u32 };
     var id: u32 = 1;
@@ -1872,9 +1871,9 @@ const FakeFragU = struct { uColor: f32 };
 const FakeProgVertex = struct {
     pub const Vert = struct {
         pub const Vertex = struct { position: [3]f32 };
-        pub const EnumDefines = struct {};
+        pub const Define = struct {};
     };
-    pub const VertDefines = Vert.EnumDefines;
+    pub const VertDefines = Vert.Define;
     pub const HasFrag = false;
     var id: u32 = 9;
     pub fn instance(_: std.mem.Allocator, _: VertDefines) !u32 {
@@ -1888,10 +1887,10 @@ const FakeProgVertex = struct {
 const FakeProgM = struct {
     pub const Vert = struct {
         pub const Vertex = struct { position: [3]f32 };
-        pub const EnumDefines = struct {};
+        pub const Define = struct {};
     };
-    pub const VertDefines = Vert.EnumDefines;
-    pub const FragDefines = FakeFragP.EnumDefines;
+    pub const VertDefines = Vert.Define;
+    pub const FragDefines = FakeFragP.Define;
     pub const Frag = FakeFragP;
     pub const HasFrag = false;
     var id: u32 = 7;
@@ -2111,7 +2110,7 @@ test "asAny forwarders on concrete types without GL" {
     const VD = struct {
         pub const Uniform = struct { uA: f32 };
         pub const IdCache = struct { uA: i32 };
-        pub const EnumDefines = struct {};
+        pub const Define = struct {};
         pub const Editor = struct {
             pub fn setUniform(self: *@This(), u: Uniform) *@This() {
                 _ = u;
@@ -2121,7 +2120,7 @@ test "asAny forwarders on concrete types without GL" {
                 _ = self;
             }
         };
-        pub fn instance(_: std.mem.Allocator, _: EnumDefines) !u32 {
+        pub fn instance(_: std.mem.Allocator, _: Define) !u32 {
             return 0;
         }
         pub fn destroy(_: std.mem.Allocator) void {}
@@ -2132,7 +2131,7 @@ test "asAny forwarders on concrete types without GL" {
     const FD = struct {
         pub const Uniform = struct { uB: f32 };
         pub const IdCache = struct { uB: i32 };
-        pub const EnumDefines = struct {};
+        pub const Define = struct {};
         pub const Editor = struct {
             pub fn setUniform(self: *@This(), u: Uniform) *@This() {
                 _ = u;
@@ -2142,7 +2141,7 @@ test "asAny forwarders on concrete types without GL" {
                 _ = self;
             }
         };
-        pub fn instance(_: std.mem.Allocator, _: EnumDefines) !u32 {
+        pub fn instance(_: std.mem.Allocator, _: Define) !u32 {
             return 0;
         }
         pub fn destroy(_: std.mem.Allocator) void {}

@@ -173,9 +173,7 @@ pub const FragmentDescriptor = struct {
                     const inner_t = try common.mapGLSLTypeToZig(allocator, u.glsl_type);
                     defer allocator.free(inner_t);
                     break :blk try std.fmt.allocPrint(allocator, "*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
-                } else if (u.is_sampler) break :blk try allocator.dupe(u8, "*const @import(\"gl_graphics\").Texture")
-                else if (struct_map.contains(u.glsl_type)) break :blk try allocator.dupe(u8, u.glsl_type)
-                else break :blk try common.mapGLSLTypeToZig(allocator, u.glsl_type);
+                } else if (u.is_sampler) break :blk try allocator.dupe(u8, "*const @import(\"gl_graphics\").Texture") else if (struct_map.contains(u.glsl_type)) break :blk try allocator.dupe(u8, u.glsl_type) else break :blk try common.mapGLSLTypeToZig(allocator, u.glsl_type);
             };
             defer allocator.free(zig_type_raw);
             try common.appendGeneratedField(allocator, &uniform_outer, "    ", u.name, zig_type_raw, is_resource);
@@ -199,7 +197,8 @@ pub const FragmentDescriptor = struct {
         }
         try inner.appendSlice(allocator, "\n");
         try common.appendEnumDefinesCode(allocator, &inner, enum_defs, combined_slice);
-        try inner.appendSlice(allocator, "    var variants: @import(\"std\").AutoHashMapUnmanaged(EnumDefines, u32) = .empty;\n\n");
+        try common.appendShaderDataTypesCode(allocator, &inner);
+        try inner.appendSlice(allocator, "    var variants: @import(\"std\").AutoHashMapUnmanaged(Define, u32) = .empty;\n\n");
 
         try inner.appendSlice(allocator, "    pub const BufferBlocks = struct {\n");
         var bind_point: usize = 0;
@@ -241,9 +240,7 @@ pub const FragmentDescriptor = struct {
                     const inner_t = try common.mapGLSLTypeToZig(allocator, u.glsl_type);
                     defer allocator.free(inner_t);
                     break :blk try std.fmt.allocPrint(allocator, "?*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
-                } else if (u.is_sampler) break :blk try allocator.dupe(u8, "?*const @import(\"gl_graphics\").Texture")
-                else if (struct_map.contains(u.glsl_type)) break :blk try allocator.dupe(u8, u.glsl_type)
-                else break :blk try common.mapGLSLTypeToZig(allocator, u.glsl_type);
+                } else if (u.is_sampler) break :blk try allocator.dupe(u8, "?*const @import(\"gl_graphics\").Texture") else if (struct_map.contains(u.glsl_type)) break :blk try allocator.dupe(u8, u.glsl_type) else break :blk try common.mapGLSLTypeToZig(allocator, u.glsl_type);
             };
             defer allocator.free(zig_param_type);
             const method_name = try std.fmt.allocPrint(allocator, "        pub fn set_{s}(self: *const Editor, value: {s}) *const Editor {{ @constCast(self)._pending.{s} = value; @constCast(self)._dirty.{s} = true; return @constCast(self); }}\n", .{ u.name, zig_param_type, u.name, u.name });
@@ -257,7 +254,7 @@ pub const FragmentDescriptor = struct {
         try inner.appendSlice(allocator, "        }\n");
         try inner.appendSlice(allocator, "    };\n\n");
 
-        try inner.appendSlice(allocator, "    pub fn instance(allocator: @import(\"std\").mem.Allocator, defines: EnumDefines) !u32 {\n");
+        try inner.appendSlice(allocator, "    pub fn instance(allocator: @import(\"std\").mem.Allocator, defines: Define) !u32 {\n");
         try inner.appendSlice(allocator, "        if (variants.get(defines)) |sid| return sid;\n");
         if (enum_defs.len == 0) {
             try inner.appendSlice(allocator, "        const src = template_src;\n");

@@ -1,4 +1,4 @@
-﻿/// Standard library import.
+/// Standard library import.
 const std = @import("std");
 /// OpenGL bindings import.
 const gl = @import("gl");
@@ -36,7 +36,7 @@ fn fillIdCache(prog_id: u32, comptime Uniform: type, cache_ptr: anytype) void {
 /// Variant cache: each unique `(vert_defines, frag_defines)` pair links its
 /// own program on first `instance(allocator, ...)`; shaders themselves compile
 /// per-stage variants via `Vert.instance(allocator, ...)` / `Frag.instance`.
-/// Both descriptors must expose `Uniform`, `IdCache`, `EnumDefines`,
+/// Both descriptors must expose `Uniform`, `IdCache`, `Define`,
 /// `instance(allocator, defines)`, `destroy(allocator)`, `edit` and `Editor`.
 /// Parameters:
 /// - vert: vertex shader descriptor type.
@@ -44,8 +44,8 @@ fn fillIdCache(prog_id: u32, comptime Uniform: type, cache_ptr: anytype) void {
 ///
 /// Returns: stateful shader program struct type (allocator for variants).
 pub fn ShaderProgram(comptime vert: type, comptime frag: type) type {
-    if (!@hasDecl(vert, "EnumDefines")) @compileError("ShaderProgram: vertex shader " ++ @typeName(vert) ++ " must expose `pub const EnumDefines` (regenerate descriptors).");
-    if (!@hasDecl(frag, "EnumDefines")) @compileError("ShaderProgram: fragment shader " ++ @typeName(frag) ++ " must expose `pub const EnumDefines` (regenerate descriptors).");
+    if (!@hasDecl(vert, "Define")) @compileError("ShaderProgram: vertex shader " ++ @typeName(vert) ++ " must expose `pub const Define` (regenerate descriptors).");
+    if (!@hasDecl(frag, "Define")) @compileError("ShaderProgram: fragment shader " ++ @typeName(frag) ++ " must expose `pub const Define` (regenerate descriptors).");
     return struct {
         /// Vertex descriptor type.
         pub const Vert = vert;
@@ -54,9 +54,9 @@ pub fn ShaderProgram(comptime vert: type, comptime frag: type) type {
         /// Always true: this program has a fragment stage.
         pub const HasFrag = true;
         /// Per-stage defines types.
-        pub const VertDefines = vert.EnumDefines;
+        pub const VertDefines = vert.Define;
         /// Per-stage defines types.
-        pub const FragDefines = frag.EnumDefines;
+        pub const FragDefines = frag.Define;
         /// Combined program key (material passes both fields).
         pub const ProgramDefines = struct {
             vert: VertDefines,
@@ -147,14 +147,14 @@ pub fn ShaderProgram(comptime vert: type, comptime frag: type) type {
 ///
 /// Returns: stateful vertex-only program struct type.
 pub fn VertexProgram(comptime vert: type) type {
-    if (!@hasDecl(vert, "EnumDefines")) @compileError("VertexProgram: vertex shader " ++ @typeName(vert) ++ " must expose `pub const EnumDefines` (regenerate descriptors).");
+    if (!@hasDecl(vert, "Define")) @compileError("VertexProgram: vertex shader " ++ @typeName(vert) ++ " must expose `pub const Define` (regenerate descriptors).");
     return struct {
         /// Vertex descriptor type.
         pub const Vert = vert;
         /// Always false: this program has no fragment stage.
         pub const HasFrag = false;
         /// Per-stage defines type (also the program key).
-        pub const VertDefines = vert.EnumDefines;
+        pub const VertDefines = vert.Define;
         /// Combined program key (single stage).
         pub const ProgramDefines = VertDefines;
         /// Linked variant with per-variant uniform cache.

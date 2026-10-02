@@ -93,9 +93,9 @@ pub const VertexDescriptor = struct {
         var block_types = std.ArrayList([]const u8).empty;
         defer block_types.deinit(allocator);
         for (uniforms) |u| if (u.kind == .block) try block_types.append(allocator, u.glsl_type);
-        try common.validateStructMembers(allocator, structs, block_types.items);
+        try common.validateStructMembers(allocator, structs, block_types.items, path, no_comments);
 
-        const enum_defs = try common.parseEnumDefines(allocator, combined_slice);
+        const enum_defs = try common.parseEnumDefines(allocator, combined_slice, path);
         defer common.freeEnumDefines(allocator, enum_defs);
 
         var inner = std.ArrayList(u8).empty;

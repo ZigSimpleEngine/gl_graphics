@@ -1,4 +1,4 @@
-﻿/// Standard library import.
+/// Standard library import.
 const std = @import("std");
 /// EmbedDescriptor type from assets_manager.
 const EmbedDescriptor = @import("assets_manager").descriptors.embed.abstract.EmbedDescriptor;
@@ -69,7 +69,7 @@ pub const GlslDescriptor = struct {
         const structs = try common.parseStructs(allocator, no_comments);
         defer common.freeStructs(allocator, structs);
 
-        try common.validateStructMembers(allocator, structs, &.{});
+        try common.validateStructMembers(allocator, structs, &.{}, path, no_comments);
 
         var inner = std.ArrayList(u8).empty;
         defer inner.deinit(allocator);
@@ -103,15 +103,13 @@ pub const GlslDescriptor = struct {
 
         const new_line_after = if (inner_slice.len > 0 and inner_slice[inner_slice.len - 1] == '\n') "" else "\n";
 
-        return std.fmt.allocPrint(allocator,
-            "{s}pub const {s} = struct {{\n{s}{s}{s}}};\n",
-            .{
-                prefix orelse "",
-                var_name,
-                inner_slice,
-                new_line_after,
-                prefix orelse "",
-            });
+        return std.fmt.allocPrint(allocator, "{s}pub const {s} = struct {{\n{s}{s}{s}}};\n", .{
+            prefix orelse "",
+            var_name,
+            inner_slice,
+            new_line_after,
+            prefix orelse "",
+        });
     }
 
     /// Returns an EmbedDescriptor vtable for this GLSL descriptor.

@@ -923,6 +923,78 @@ fn skipBlank(s: []const u8, i: usize) usize {
     return j;
 }
 
+/// 1-based line/column position inside a shader source text.
+pub const SourceLoc = struct {
+    line: usize,
+    col: usize,
+};
+
+/// Converts a byte offset into a 1-based line/column position.
+/// Offsets past the end clamp to the end of the source.
+pub fn lineColAt(source: []const u8, offset: usize) SourceLoc {
+    var line: usize = 1;
+    var col: usize = 1;
+    const end = @min(offset, source.len);
+    var i: usize = 0;
+    while (i < end) : (i += 1) {
+        if (source[i] == '\n') {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    return .{ .line = line, .col = col };
+}
+
+/// Finds the first whole-word occurrence of `word` at/after `start`.
+/// Returns the byte offset of the word, or null when absent.
+fn findWordOffset(source: []const u8, word: []const u8, start: usize) ?usize {
+    var i: usize = start;
+    while (std.mem.indexOfPos(u8, source, i, word)) |pos| {
+        const before_ok = pos == 0 or !isAlnum(source[pos - 1]);
+        const after = pos + word.len;
+        const after_ok = after >= source.len or !isAlnum(source[after]);
+        if (before_ok and after_ok) return pos;
+        i = pos + 1;
+    }
+    return null;
+}
+
+/// Finds the byte offset of the name in a `struct <name>` declaration.
+/// Returns null when no such declaration exists in `source`.
+fn findStructDeclOffset(source: []const u8, name: []const u8) ?usize {
+    var i: usize = 0;
+    while (std.mem.indexOfPos(u8, source, i, "struct")) |pos| {
+        const before_ok = pos == 0 or !isAlnum(source[pos - 1]);
+        const after = pos + 6;
+        const after_ok = after >= source.len or isWhitespace(source[after]);
+        if (!before_ok or !after_ok) {
+            i = pos + 6;
+            continue;
+        }
+        var j = skipSpaces(source, after);
+        const name_start = j;
+        while (j < source.len and (isAlnum(source[j]) or source[j] == '_')) j += 1;
+        if (j > name_start and std.mem.eql(u8, source[name_start..j], name)) return name_start;
+        i = j;
+    }
+    return null;
+}
+
+/// Prints one shader asset error: the file (plus `line:col` when known)
+/// always comes first, with a blank line after so consecutive errors never
+/// run together. Print, not log.err, so tests expecting errors
+/// do not fail the test runner.
+fn printShaderError(file: []const u8, loc: ?SourceLoc, comptime fmt: []const u8, args: anytype) void {
+    if (loc) |l| {
+        std.debug.print("{s}:{d}:{d}: ", .{ file, l.line, l.col });
+    } else {
+        std.debug.print("{s}: ", .{file});
+    }
+    std.debug.print(fmt ++ "\n\n", args);
+}
+
 /// Parses `#define ENUM_*` / `#if` / `#elif` after includes are inlined.
 /// Template keeps comments, so directives inside `//` and `/* */` (and
 /// GLSL `"...` strings) are ignored via a space-preserving cleaned copy
@@ -936,9 +1008,11 @@ fn skipBlank(s: []const u8, i: usize) usize {
 /// Parameters:
 /// - allocator: allocator for results.
 /// - combined: inlined GLSL source (template, comments preserved).
+/// - file_path: shader file being compiled (e.g. `assets/shaders/foo.vert`);
+///   shown first in every error hint together with `line:col` in `combined`.
 ///
 /// Returns: defines in first-`#define` order (field order == slot order).
-pub fn parseEnumDefines(allocator: std.mem.Allocator, combined: []const u8) ![]EnumDefineDef {
+pub fn parseEnumDefines(allocator: std.mem.Allocator, combined: []const u8, file_path: []const u8) ![]EnumDefineDef {
     var defs = std.ArrayList(EnumDefineDef).empty;
     errdefer {
         for (defs.items) |*d| {
@@ -971,8 +1045,10 @@ pub fn parseEnumDefines(allocator: std.mem.Allocator, combined: []const u8) ![]E
 
     var in_block = false;
     var offset: usize = 0;
+    var line_no: usize = 1;
     var line_it = std.mem.splitScalar(u8, combined, '\n');
     while (line_it.next()) |raw_line| {
+        defer line_no += 1;
         const line = if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\r') raw_line[0 .. raw_line.len - 1] else raw_line;
         const line_start = offset;
         offset += raw_line.len + 1;
@@ -1042,30 +1118,30 @@ pub fn parseEnumDefines(allocator: std.mem.Allocator, combined: []const u8) ![]E
             const is_enum = std.mem.startsWith(u8, name, "ENUM_");
             if (!is_enum) {
                 if (isReservedTagName(name)) {
-                    std.debug.print("ENUM_: user #define '{s}' uses reserved tag shape `_N`/`_mN`/`_0x..`. Rename it: `_0`, `_m12`, `_0x10` are generated from numeric ENUM_ values.\n", .{name});
+                    printShaderError(file_path, .{ .line = line_no, .col = name_start + 1 }, "ENUM_: user #define '{s}' uses reserved tag shape `_N`/`_mN`/`_0x..`. Rename it: `_0`, `_m12`, `_0x10` are generated from numeric ENUM_ values.", .{name});
                     return error.ReservedDefineName;
                 }
                 continue;
             }
             if (token.len == 0 or rest.len != 0) {
-                std.debug.print("ENUM_: '#define {s}' must have exactly one value token (int, hex or macro name). Example: `#define {s} 0`. Move expressions into a separate `#define OTHER ...` and use its name.", .{ name, name });
+                printShaderError(file_path, .{ .line = line_no, .col = name_start + 1 }, "ENUM_: '#define {s}' must have exactly one value token (int, hex or macro name). Example: `#define {s} 0`. Move expressions into a separate `#define OTHER ...` and use its name.", .{ name, name });
                 return error.InvalidEnumToken;
             }
             if (!isValidEnumToken(token)) {
-                std.debug.print("ENUM_: '#define {s} {s}': value must be a single decimal int (`0`, `-12`), hex (`0x10`) or macro name (`TRUE`). No expressions or parens.", .{ name, token });
+                printShaderError(file_path, .{ .line = line_no, .col = after_name + 1 }, "ENUM_: '#define {s} {s}': value must be a single decimal int (`0`, `-12`), hex (`0x10`) or macro name (`TRUE`). No expressions or parens.", .{ name, token });
                 return error.InvalidEnumToken;
             }
             if (index_of.contains(name)) {
-                std.debug.print("ENUM_: duplicate `#define {s}`. Keep exactly one `#define {s} <default>` in the whole inlined source (includes count); runtime variants replace its token in place.", .{ name, name });
+                printShaderError(file_path, .{ .line = line_no, .col = name_start + 1 }, "ENUM_: duplicate `#define {s}`. Keep exactly one `#define {s} <default>` in the whole inlined source (includes count); runtime variants replace its token in place.", .{ name, name });
                 return error.DuplicateEnumDefine;
             }
             const suffix = name["ENUM_".len..];
             if (suffix.len == 0 or !isValidZigIdent(suffix)) {
-                std.debug.print("ENUM_: name '{s}' has invalid suffix '{s}' after `ENUM_`. The suffix becomes a Zig field 1:1, so it must be `[A-Za-z_][A-Za-z0-9_]*` and not a Zig keyword.", .{ name, suffix });
+                printShaderError(file_path, .{ .line = line_no, .col = name_start + 1 }, "ENUM_: name '{s}' has invalid suffix '{s}' after `ENUM_`. The suffix becomes a Zig field 1:1, so it must be `[A-Za-z_][A-Za-z0-9_]*` and not a Zig keyword.", .{ name, suffix });
                 return error.InvalidEnumFieldName;
             }
             if (isReservedTagName(token) and isIdentToken(token)) {
-                std.debug.print("ENUM_: value '{s}' for '{s}' uses reserved tag shape. Do not define macros named `_0`, `_m12`, `_0x10` yourself.", .{ token, name });
+                printShaderError(file_path, .{ .line = line_no, .col = after_name + 1 }, "ENUM_: value '{s}' for '{s}' uses reserved tag shape. Do not define macros named `_0`, `_m12`, `_0x10` yourself.", .{ token, name });
                 return error.ReservedDefineName;
             }
             const name_copy = try allocator.dupe(u8, name);
@@ -1138,11 +1214,13 @@ pub fn parseEnumDefines(allocator: std.mem.Allocator, combined: []const u8) ![]E
             const ename = enum_side orelse continue;
             if (!isIdentToken(ename) or !std.mem.startsWith(u8, ename, "ENUM_")) continue;
             if (other_side.len == 0 or !isValidEnumToken(other_side)) {
-                std.debug.print("ENUM_: comparison for '{s}' must use a single token (`#if {s} == 1`, `== OTHER`). No expressions or parens around the value.", .{ ename, ename });
+                const hash_col = (std.mem.indexOfScalar(u8, cleaned, '#') orelse 0) + 1;
+                printShaderError(file_path, .{ .line = line_no, .col = hash_col }, "ENUM_: comparison for '{s}' must use a single token (`#if {s} == 1`, `== OTHER`). No expressions or parens around the value.", .{ ename, ename });
                 return error.InvalidEnumToken;
             }
             if (isIdentToken(other_side) and isReservedTagName(other_side)) {
-                std.debug.print("ENUM_: compared value '{s}' uses reserved tag shape `_N`/`_mN`. Rename your macro.", .{other_side});
+                const hash_col = (std.mem.indexOfScalar(u8, cleaned, '#') orelse 0) + 1;
+                printShaderError(file_path, .{ .line = line_no, .col = hash_col }, "ENUM_: compared value '{s}' uses reserved tag shape `_N`/`_mN`. Rename your macro.", .{other_side});
                 return error.ReservedDefineName;
             }
             const owned_key = try allocator.dupe(u8, ename);
@@ -1170,7 +1248,8 @@ pub fn parseEnumDefines(allocator: std.mem.Allocator, combined: []const u8) ![]E
         var it = extra.iterator();
         while (it.next()) |e| {
             const idx = index_of.get(e.key_ptr.*) orelse {
-                std.debug.print("ENUM_: '{s}' is compared in `#if`/`#elif` but has no `#define`. Add exactly one `#define {s} <default>` (int, hex or macro name); runtime `use` will replace its token in place. Example:\n  #define {s} 0\n  #if {s} == 1\n  #elif {s} == OTHER", .{ e.key_ptr.*, e.key_ptr.*, e.key_ptr.*, e.key_ptr.*, e.key_ptr.* });
+                const loc: ?SourceLoc = if (findWordOffset(combined, e.key_ptr.*, 0)) |off| lineColAt(combined, off) else null;
+                printShaderError(file_path, loc, "ENUM_: '{s}' is compared in `#if`/`#elif` but has no `#define`. Add exactly one `#define {s} <default>` (int, hex or macro name); runtime `use` will replace its token in place. Example:\n  #define {s} 0\n  #if {s} == 1\n  #elif {s} == OTHER", .{ e.key_ptr.*, e.key_ptr.*, e.key_ptr.*, e.key_ptr.*, e.key_ptr.* });
                 return error.MissingEnumDefault;
             };
             for (e.value_ptr.items) |tok| {
@@ -1187,7 +1266,7 @@ pub fn parseEnumDefines(allocator: std.mem.Allocator, combined: []const u8) ![]E
                 for (defs.items[idx].values) |v| {
                     if (std.mem.eql(u8, v.tag, tag)) {
                         allocator.free(tag);
-                        std.debug.print("ENUM_: tag collision for '{s}': tokens map to the same Zig tag. Rename the macro value.", .{defs.items[idx].name});
+                        printShaderError(file_path, lineColAt(combined, defs.items[idx].slot_offset), "ENUM_: tag collision for '{s}': tokens map to the same Zig tag. Rename the macro value.", .{defs.items[idx].name});
                         return error.InvalidEnumToken;
                     }
                 }
@@ -1261,7 +1340,19 @@ pub const StructMemberError = error{
     OpaqueStructMember,
     /// A struct member uses a uniform block type.
     BlockStructMember,
+    /// A GLSL struct or uniform block type uses a reserved generator name.
+    ReservedStructName,
 };
+
+/// Returns true for struct/block type names reserved by the generator.
+///
+/// The generator emits `pub const Uniform` and `pub const Define` into every
+/// `.vert`/`.frag` shader, so user GLSL must never declare `struct Define`,
+/// `struct Uniform` or `uniform Define`/`uniform Uniform` blocks: they would
+/// collide with (or silently rewire) the generated decls.
+fn isReservedStructName(name: []const u8) bool {
+    return std.mem.eql(u8, name, "Define") or std.mem.eql(u8, name, "Uniform");
+}
 
 /// Returns true for GLSL opaque types that can never live in a struct
 /// uploaded by the runtime: samplers, images and atomic counters.
@@ -1274,12 +1365,15 @@ fn isOpaqueMemberType(typ: []const u8) bool {
 
 /// Recursively checks one struct's members for opaque/block types.
 /// `path` holds the current DFS chain for cycle protection.
+/// `file_path`/`source` locate the offending declaration for the error hint.
 fn checkStructMembers(
     allocator: std.mem.Allocator,
     by_name: *const std.StringHashMap(*const StructDef),
     block_types: []const []const u8,
     s: *const StructDef,
     path: *std.ArrayList([]const u8),
+    file_path: []const u8,
+    source: []const u8,
 ) (StructMemberError || std.mem.Allocator.Error)!void {
     for (path.items) |n| {
         if (std.mem.eql(u8, n, s.name)) return;
@@ -1288,36 +1382,74 @@ fn checkStructMembers(
     defer _ = path.pop();
     for (s.fields) |*f| {
         if (isOpaqueMemberType(f.typ)) {
-            std.debug.print("STRUCT_: struct '{s}' member '{s}' has opaque type '{s}'. Opaque types (samplers, images, atomics) cannot be struct members: the runtime never uploads them and strict drivers reject the shader. Keep resources as flat top-level uniforms (e.g. `uniform sampler2D uTex;`) and numeric-only data in structs.\n", .{ s.name, f.name, f.typ });
+            const loc: ?SourceLoc = blk: {
+                if (findStructDeclOffset(source, s.name)) |soff| {
+                    if (findWordOffset(source, f.name, soff)) |moff| break :blk lineColAt(source, moff);
+                    break :blk lineColAt(source, soff);
+                }
+                break :blk null;
+            };
+            printShaderError(file_path, loc, "STRUCT_: struct '{s}' member '{s}' has opaque type '{s}'. Opaque types (samplers, images, atomics) cannot be struct members: the runtime never uploads them and strict drivers reject the shader. Keep resources as flat top-level uniforms (e.g. `uniform sampler2D uTex;`) and numeric-only data in structs.", .{ s.name, f.name, f.typ });
             return error.OpaqueStructMember;
         }
         for (block_types) |b| {
             if (!std.mem.eql(u8, b, f.typ)) continue;
-            std.debug.print("STRUCT_: struct '{s}' member '{s}' uses uniform block type '{s}'. Uniform blocks cannot be struct members: bind them as flat top-level `uniform {s} {{ ... }} instance;` uniforms instead.\n", .{ s.name, f.name, f.typ, f.typ });
+            const loc: ?SourceLoc = blk: {
+                if (findStructDeclOffset(source, s.name)) |soff| {
+                    if (findWordOffset(source, f.name, soff)) |moff| break :blk lineColAt(source, moff);
+                    break :blk lineColAt(source, soff);
+                }
+                break :blk null;
+            };
+            printShaderError(file_path, loc, "STRUCT_: struct '{s}' member '{s}' uses uniform block type '{s}'. Uniform blocks cannot be struct members: bind them as flat top-level `uniform {s} {{ ... }} instance;` uniforms instead.", .{ s.name, f.name, f.typ, f.typ });
             return error.BlockStructMember;
         }
         if (by_name.get(f.typ)) |nested| {
-            try checkStructMembers(allocator, by_name, block_types, nested, path);
+            try checkStructMembers(allocator, by_name, block_types, nested, path, file_path, source);
         }
     }
 }
 
-/// Validates that no struct member — directly or transitively through nested
+/// Validates that no struct — directly or transitively through nested
 /// structs — uses an opaque GLSL type (`sampler*`, `image*`, `atomic_uint`)
-/// or a uniform block type. Such members can neither be uploaded by the
-/// runtime (`flattenUniforms` skips pointer leaves) nor compiled by strict
-/// drivers, so they are rejected at asset compile time with a usage hint.
+/// or a uniform block type, and that no struct or uniform block type uses a
+/// reserved generator name (`Define`, `Uniform`). Such members can neither be
+/// uploaded by the runtime (`flattenUniforms` skips pointer leaves) nor
+/// compiled by strict drivers, and reserved names would collide with the
+/// generated `pub const Uniform` / `pub const Define` decls, so they are
+/// rejected at asset compile time with a usage hint.
 /// Parameters:
 /// - allocator: allocator for internal index/path.
 /// - structs: parsed struct definitions (borrowed).
 /// - block_types: uniform block type names in scope (borrowed).
+/// - file_path: shader file being compiled; shown first in every error hint
+///   together with `line:col` in `source`.
+/// - source: source text the structs were parsed from (used to locate the
+///   offending declaration).
 ///
-/// Returns: `OpaqueStructMember` / `BlockStructMember` on violation.
+/// Returns: `OpaqueStructMember` / `BlockStructMember` /
+/// `ReservedStructName` on violation.
 pub fn validateStructMembers(
     allocator: std.mem.Allocator,
     structs: []const StructDef,
     block_types: []const []const u8,
+    file_path: []const u8,
+    source: []const u8,
 ) (StructMemberError || std.mem.Allocator.Error)!void {
+    for (structs) |*s| {
+        if (isReservedStructName(s.name)) {
+            const loc: ?SourceLoc = if (findStructDeclOffset(source, s.name)) |off| lineColAt(source, off) else null;
+            printShaderError(file_path, loc, "STRUCT_: struct '{s}' uses reserved name '{s}'. Names `Define` and `Uniform` are reserved by the generator (it emits `pub const Uniform` and `pub const Define` into every .vert/.frag shader): rename your GLSL struct (e.g. `struct {s}Data`). Do not declare `struct Define`, `struct Uniform` or `uniform Define`/`uniform Uniform` blocks.", .{ s.name, s.name, s.name });
+            return error.ReservedStructName;
+        }
+    }
+    for (block_types) |b| {
+        if (isReservedStructName(b)) {
+            const loc: ?SourceLoc = if (findWordOffset(source, b, 0)) |off| lineColAt(source, off) else null;
+            printShaderError(file_path, loc, "STRUCT_: uniform block type '{s}' uses reserved name '{s}'. Names `Define` and `Uniform` are reserved by the generator (it emits `pub const Uniform` and `pub const Define` into every .vert/.frag shader): rename your uniform block type (e.g. `{s}Block`). Do not declare `struct Define`, `struct Uniform` or `uniform Define`/`uniform Uniform` blocks.", .{ b, b, b });
+            return error.ReservedStructName;
+        }
+    }
     var by_name = std.StringHashMap(*const StructDef).init(allocator);
     defer by_name.deinit();
     for (structs) |*s| try by_name.put(s.name, s);
@@ -1325,7 +1457,7 @@ pub fn validateStructMembers(
     defer path.deinit(allocator);
     for (structs) |*s| {
         path.clearRetainingCapacity();
-        try checkStructMembers(allocator, &by_name, block_types, s, &path);
+        try checkStructMembers(allocator, &by_name, block_types, s, &path, file_path, source);
     }
 }
 
@@ -1461,7 +1593,7 @@ test "map glsl to zig" {
 test "enum defines basic with if comparisons" {
     const alloc = std.testing.allocator;
     const src = "#version 300 es\n#define ENUM_MODE 0\n#if ENUM_MODE == 1\n#endif\n#if ENUM_MODE == OTHER\n#endif\nvoid main() {}\n";
-    const defs = try parseEnumDefines(alloc, src);
+    const defs = try parseEnumDefines(alloc, src, "test.vert");
     defer freeEnumDefines(alloc, defs);
     try std.testing.expectEqual(@as(usize, 1), defs.len);
     try std.testing.expectEqualStrings("ENUM_MODE", defs[0].name);
@@ -1476,7 +1608,7 @@ test "enum defines basic with if comparisons" {
 test "enum defines ignores comments and ifdef" {
     const alloc = std.testing.allocator;
     const src = "#version 300 es\n// #define ENUM_BAD 1\n/* #define ENUM_BAD2 2 */\n#define ENUM_OK TRUE\n#ifdef ENUM_OK\n#endif\nvoid main() {}\n";
-    const defs = try parseEnumDefines(alloc, src);
+    const defs = try parseEnumDefines(alloc, src, "test.vert");
     defer freeEnumDefines(alloc, defs);
     try std.testing.expectEqual(@as(usize, 1), defs.len);
     try std.testing.expectEqualStrings("ENUM_OK", defs[0].name);
@@ -1485,19 +1617,19 @@ test "enum defines ignores comments and ifdef" {
 test "enum defines duplicate and missing errors" {
     const alloc = std.testing.allocator;
     const dup = "#version 300 es\n#define ENUM_A 0\n#define ENUM_A 1\n";
-    try std.testing.expectError(error.DuplicateEnumDefine, parseEnumDefines(alloc, dup));
+    try std.testing.expectError(error.DuplicateEnumDefine, parseEnumDefines(alloc, dup, "test.frag"));
     const miss = "#version 300 es\n#if ENUM_MISSING == 1\n#endif\n";
-    try std.testing.expectError(error.MissingEnumDefault, parseEnumDefines(alloc, miss));
+    try std.testing.expectError(error.MissingEnumDefault, parseEnumDefines(alloc, miss, "test.frag"));
     const bad_tok = "#version 300 es\n#define ENUM_B 1+2\n";
-    try std.testing.expectError(error.InvalidEnumToken, parseEnumDefines(alloc, bad_tok));
+    try std.testing.expectError(error.InvalidEnumToken, parseEnumDefines(alloc, bad_tok, "test.frag"));
     const reserved = "#version 300 es\n#define _0 5\n";
-    try std.testing.expectError(error.ReservedDefineName, parseEnumDefines(alloc, reserved));
+    try std.testing.expectError(error.ReservedDefineName, parseEnumDefines(alloc, reserved, "test.frag"));
 }
 
 test "enum defines hex no normalization and negative" {
     const alloc = std.testing.allocator;
     const src = "#version 300 es\n#define ENUM_H 0x10\n#if ENUM_H == 16\n#endif\n#if ENUM_H == -12\n#endif\n";
-    const defs = try parseEnumDefines(alloc, src);
+    const defs = try parseEnumDefines(alloc, src, "test.vert");
     defer freeEnumDefines(alloc, defs);
     try std.testing.expectEqual(@as(usize, 3), defs[0].values.len);
     try std.testing.expectEqualStrings("_0x10", defs[0].values[0].tag);
@@ -1551,7 +1683,7 @@ test "validateStructMembers accepts numeric and nested structs" {
     var mat = try testStructDef(alloc, "Material", &.{ "vec4", "Light" });
     defer freeTestStructDef(alloc, &mat);
     const defs = [_]StructDef{ light, mat };
-    try validateStructMembers(alloc, &defs, &.{});
+    try validateStructMembers(alloc, &defs, &.{}, "test.glsl", "struct Light { vec3 position; float intensity; } struct Material { vec4 diffuse; Light light; }");
 }
 
 test "validateStructMembers rejects opaque and block members" {
@@ -1561,14 +1693,14 @@ test "validateStructMembers rejects opaque and block members" {
         var bad = try testStructDef(alloc, "Bad", &.{"sampler2D"});
         defer freeTestStructDef(alloc, &bad);
         const defs = [_]StructDef{bad};
-        try std.testing.expectError(error.OpaqueStructMember, validateStructMembers(alloc, &defs, &.{}));
+        try std.testing.expectError(error.OpaqueStructMember, validateStructMembers(alloc, &defs, &.{}, "test.glsl", ""));
     }
     // Sampler array, image and atomic members.
     {
         var bad = try testStructDef(alloc, "Bad2", &.{ "samplerCube", "image2D", "atomic_uint" });
         defer freeTestStructDef(alloc, &bad);
         const defs = [_]StructDef{bad};
-        try std.testing.expectError(error.OpaqueStructMember, validateStructMembers(alloc, &defs, &.{}));
+        try std.testing.expectError(error.OpaqueStructMember, validateStructMembers(alloc, &defs, &.{}, "test.glsl", ""));
     }
     // Transitive: holder -> inner with sampler.
     {
@@ -1577,7 +1709,7 @@ test "validateStructMembers rejects opaque and block members" {
         var holder = try testStructDef(alloc, "Holder", &.{"Inner"});
         defer freeTestStructDef(alloc, &holder);
         const defs = [_]StructDef{ inner, holder };
-        try std.testing.expectError(error.OpaqueStructMember, validateStructMembers(alloc, &defs, &.{}));
+        try std.testing.expectError(error.OpaqueStructMember, validateStructMembers(alloc, &defs, &.{}, "test.glsl", ""));
     }
     // Uniform block type member.
     {
@@ -1585,8 +1717,54 @@ test "validateStructMembers rejects opaque and block members" {
         defer freeTestStructDef(alloc, &s);
         const defs = [_]StructDef{s};
         const blocks = [_][]const u8{"MyBlock"};
-        try std.testing.expectError(error.BlockStructMember, validateStructMembers(alloc, &defs, &blocks));
+        try std.testing.expectError(error.BlockStructMember, validateStructMembers(alloc, &defs, &blocks, "test.glsl", "struct S { MyBlock m; }"));
     }
+}
+
+test "validateStructMembers rejects reserved Define and Uniform names" {
+    const alloc = std.testing.allocator;
+    // GLSL struct named Define.
+    {
+        var bad = try testStructDef(alloc, "Define", &.{"float"});
+        defer freeTestStructDef(alloc, &bad);
+        const defs = [_]StructDef{bad};
+        try std.testing.expectError(error.ReservedStructName, validateStructMembers(alloc, &defs, &.{}, "test.vert", "struct Define { float m; }"));
+    }
+    // GLSL struct named Uniform.
+    {
+        var bad = try testStructDef(alloc, "Uniform", &.{"vec3"});
+        defer freeTestStructDef(alloc, &bad);
+        const defs = [_]StructDef{bad};
+        try std.testing.expectError(error.ReservedStructName, validateStructMembers(alloc, &defs, &.{}, "test.frag", "struct Uniform { vec3 m; }"));
+    }
+    // Uniform block type named Define / Uniform.
+    {
+        var s = try testStructDef(alloc, "S", &.{"float"});
+        defer freeTestStructDef(alloc, &s);
+        const defs = [_]StructDef{s};
+        const blocks_define = [_][]const u8{"Define"};
+        try std.testing.expectError(error.ReservedStructName, validateStructMembers(alloc, &defs, &blocks_define, "test.vert", "uniform Define { float m; } s;"));
+        const blocks_uniform = [_][]const u8{"Uniform"};
+        try std.testing.expectError(error.ReservedStructName, validateStructMembers(alloc, &defs, &blocks_uniform, "test.vert", "uniform Uniform { float m; } s;"));
+    }
+    // Sanity: similar but non-reserved names still pass.
+    {
+        var ok = try testStructDef(alloc, "Defines", &.{"float"});
+        defer freeTestStructDef(alloc, &ok);
+        const defs = [_]StructDef{ok};
+        try validateStructMembers(alloc, &defs, &.{}, "test.glsl", "struct Defines { float m; }");
+    }
+}
+
+test "shader error locations resolve line:col" {
+    const src = "line one\nstruct Define { float m; }\nthird\n";
+    const soff = findStructDeclOffset(src, "Define").?;
+    try std.testing.expectEqualDeep(SourceLoc{ .line = 2, .col = 8 }, lineColAt(src, soff));
+    try std.testing.expect(findStructDeclOffset(src, "Missing") == null);
+    // Whole-word match only: `oneline` must not match `one`.
+    try std.testing.expectEqual(@as(usize, 0), findWordOffset(src, "line", 0).?);
+    try std.testing.expect(findWordOffset(src, "oneline", 0) == null);
+    try std.testing.expectEqual(soff, findWordOffset(src, "Define", 0).?);
 }
 
 test "enum defines slots survive CRLF normalization" {
@@ -1607,7 +1785,7 @@ test "enum defines slots survive CRLF normalization" {
     const template = try combined.toOwnedSlice(alloc);
     defer alloc.free(template);
     try std.testing.expect(std.mem.indexOf(u8, template, "\r") == null);
-    const defs = try parseEnumDefines(alloc, template);
+    const defs = try parseEnumDefines(alloc, template, "test.frag");
     defer freeEnumDefines(alloc, defs);
     try std.testing.expectEqual(@as(usize, 1), defs.len);
     try std.testing.expectEqualStrings("0", template[defs[0].slot_offset .. defs[0].slot_offset + defs[0].slot_len]);
@@ -1616,7 +1794,7 @@ test "enum defines slots survive CRLF normalization" {
 test "enum defines codegen emits template and slots" {
     const alloc = std.testing.allocator;
     const src = "#version 300 es\n#define ENUM_MODE 0\n#if ENUM_MODE == 1\n#endif\nvoid main() {}\n";
-    const defs = try parseEnumDefines(alloc, src);
+    const defs = try parseEnumDefines(alloc, src, "test.vert");
     defer freeEnumDefines(alloc, defs);
     var inner: std.ArrayList(u8) = .empty;
     defer inner.deinit(alloc);

@@ -69,7 +69,7 @@ pub const GlslDescriptor = struct {
         const structs = try common.parseStructs(allocator, no_comments);
         defer common.freeStructs(allocator, structs);
 
-        try common.validateStructMembers(allocator, structs, &.{}, path, no_comments);
+        try common.validateStructMembers(allocator, structs, &.{}, no_comments, .{ .main_path = path, .combined = no_comments });
 
         var inner = std.ArrayList(u8).empty;
         defer inner.deinit(allocator);

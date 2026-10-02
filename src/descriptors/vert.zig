@@ -70,11 +70,15 @@ pub const VertexDescriptor = struct {
         // declaration order (e.g. precision hints before structs) is kept.
         var combined = std.ArrayList(u8).empty;
         defer combined.deinit(allocator);
-        try common.resolveShaderIncludes(allocator, io, &combined, raw_main, path, &visited, &link_map);
+        var imap = common.IncludeMap.init(allocator);
+        defer imap.deinit();
+        try common.resolveShaderIncludes(allocator, io, &combined, raw_main, path, &visited, &link_map, &imap);
         const combined_slice = try combined.toOwnedSlice(allocator);
         defer allocator.free(combined_slice);
 
-        const no_comments = try common.stripComments(allocator, combined_slice);
+        var comment_regions = std.ArrayList(common.CommentRegion).empty;
+        defer comment_regions.deinit(allocator);
+        const no_comments = try common.stripCommentsTracked(allocator, combined_slice, &comment_regions);
         defer allocator.free(no_comments);
 
         const structs = try common.parseStructs(allocator, no_comments);
@@ -93,9 +97,15 @@ pub const VertexDescriptor = struct {
         var block_types = std.ArrayList([]const u8).empty;
         defer block_types.deinit(allocator);
         for (uniforms) |u| if (u.kind == .block) try block_types.append(allocator, u.glsl_type);
-        try common.validateStructMembers(allocator, structs, block_types.items, path, no_comments);
+        const err_ctx = common.ShaderErrCtx{
+            .main_path = path,
+            .combined = combined_slice,
+            .comments = comment_regions.items,
+            .includes = &imap,
+        };
+        try common.validateStructMembers(allocator, structs, block_types.items, no_comments, err_ctx);
 
-        const enum_defs = try common.parseEnumDefines(allocator, combined_slice, path);
+        const enum_defs = try common.parseEnumDefines(allocator, combined_slice, err_ctx);
         defer common.freeEnumDefines(allocator, enum_defs);
 
         var inner = std.ArrayList(u8).empty;

@@ -1867,7 +1867,7 @@ const FakeProgramNoFrag = struct {
 // Minimal fake materials: plain structs like `Material`/`VertexMaterial`
 // (no create/destroy), so the full `AnyMaterial` API
 // (wrap/wrapVertex/cast/fields/cache/Editor) is testable.
-const FakeVertU = struct { uMvp: f32, uFlag: bool };
+const FakeVertU = struct { uMvp: f32, uFlag: bool, uTex: ?*const u8 = null };
 const FakeFragU = struct { uColor: f32 };
 const FakeProgVertex = struct {
     pub const Vert = struct {
@@ -2037,6 +2037,16 @@ test "any material wrap/fields/cache/editor without GL" {
     try e2.apply();
     try std.testing.expectEqual(@as(f32, 3.0), try rec.getVertUniformData(id_mvp, f32));
     try std.testing.expect(try rec.getVertUniformData(id_flag, bool));
+
+    // Nullable resource field: defaults to null, roundtrips null and non-null.
+    try std.testing.expect(m.vertUniform.uTex == null);
+    const id_tex = rec.getVertUniformFieldId("uTex", ?*const u8) orelse unreachable;
+    try std.testing.expect(rec.getVertUniformRaw().len == @sizeOf(FakeVertU));
+    try rec.setVertUniformData(id_tex, @as(?*const u8, null));
+    try std.testing.expect((try rec.getVertUniformData(id_tex, ?*const u8)) == null);
+    var xb: u8 = 9;
+    try rec.setVertUniformData(id_tex, @as(?*const u8, &xb));
+    try std.testing.expectEqual(@as(u8, 9), (try rec.getVertUniformData(id_tex, ?*const u8)).?.*);
 
     try rec.use(alloc);
     try std.testing.expect(m.used);

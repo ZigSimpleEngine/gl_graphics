@@ -120,10 +120,29 @@ pub fn flattenUniforms(program: u32, comptime prefix: []const u8, comptime T: ty
     }
 }
 
+/// Returns true when `T` is an optional pointer to a texture
+/// (`?*const Texture` in any const/mutability form).
+fn isOptionalSampler(comptime T: type) bool {
+    if (@typeInfo(T) != .optional) return false;
+    const Child = @typeInfo(T).optional.child;
+    return Child == Texture or Child == *const Texture or Child == *Texture;
+}
+
+/// Returns true when `T` is an optional pointer to a uniform block buffer
+/// (`?*const Buffer(X)` — pointer to opaque with `DataType`).
+fn isOptionalBuffer(comptime T: type) bool {
+    if (@typeInfo(T) != .optional) return false;
+    const Child = @typeInfo(T).optional.child;
+    const DerefT = if (@typeInfo(Child) == .pointer) std.meta.Child(Child) else void;
+    return @typeInfo(DerefT) == .@"opaque" and @hasDecl(DerefT, "DataType");
+}
+
 /// Applies pending editor uniforms that are marked dirty (or all of them
 /// when `set_all` is true), then resets the dirty flags. Dispatches on the
-/// uniform type: textures, uniform block buffers, math types, scalars and
-/// nested structs.
+/// uniform type: textures, uniform block buffers (plain and nullable),
+/// math types, scalars and nested structs. Nullable resources (`null`)
+/// explicitly unbind instead of being skipped: samplers bind texture 0 on
+/// the unit and upload it, uniform blocks bind base 0 on their point.
 /// Parameters:
 /// - UniformT: editor uniform struct type.
 /// - BlocksT: buffer block table (`name` -> `{ .name, .point }`).
@@ -149,7 +168,30 @@ pub fn applyUniforms(
             const T = @TypeOf(value);
             const DerefT = if (@typeInfo(T) == .pointer) std.meta.Child(T) else void;
             const loc = gl.uniforms.location(program, @ptrCast(name));
-            if (loc != -1 and (T == Texture or T == *const Texture or T == *Texture)) {
+            if (comptime isOptionalSampler(T)) {
+                if (loc != -1) {
+                    const unit: u32 = 0;
+                    gl.textures.activeTexture(@enumFromInt(@intFromEnum(gl.textures.TextureUnit.texture0) + unit));
+                    if (value) |tex| {
+                        gl.textures.bind(.texture_2d, tex.getId());
+                    } else {
+                        gl.textures.bind(.texture_2d, 0);
+                    }
+                    gl.uniforms.uniform1i(loc, @intCast(unit));
+                }
+            } else if (comptime isOptionalBuffer(T)) {
+                // Uniform block buffer (UBO), nullable: null unbinds the point.
+                const block = @field(BlocksT, name);
+                const bidx = gl.uniforms.blockIndex(program, block.name);
+                if (bidx != 0xFFFFFFFF) {
+                    gl.uniforms.blockBinding(program, bidx, block.point);
+                    if (value) |buf| {
+                        gl.buffers.bindBase(.uniform_buffer, block.point, buf.getId());
+                    } else {
+                        gl.buffers.bindBase(.uniform_buffer, block.point, 0);
+                    }
+                }
+            } else if (loc != -1 and (T == Texture or T == *const Texture or T == *Texture)) {
                 const unit: u32 = 0;
                 gl.textures.activeTexture(@enumFromInt(@intFromEnum(gl.textures.TextureUnit.texture0) + unit));
                 gl.textures.bind(.texture_2d, value.getId());
@@ -240,7 +282,7 @@ pub fn compileShaderSource(kind: gl.shaders.ShaderType, src: []const u8) u32 {
     if (ok == 0) {
         var log: [512]u8 = undefined;
         const len = gl.shaders.getInfoLog(shader, &log);
-        _ = len;
+        std.debug.print("GLSL shader compile failed (kind={}, id={}):\n{s}\n--- source ---\n{s}\n--- end source ---\n", .{ kind, shader, log[0..@min(len, log.len)], src });
     }
     return shader;
 }
@@ -367,6 +409,18 @@ pub fn uploadUniformByKind(loc: i32, kind: gpu_meta.UniformKind, bytes: []const 
     }
 }
 
+test "optional resource classifiers" {
+    const Buf = @import("buffer.zig").Buffer(f32);
+    try std.testing.expect(isOptionalSampler(?*const Texture));
+    try std.testing.expect(isOptionalSampler(?*Texture));
+    try std.testing.expect(!isOptionalSampler(*const Texture));
+    try std.testing.expect(!isOptionalSampler(f32));
+    try std.testing.expect(isOptionalBuffer(?*const Buf));
+    try std.testing.expect(!isOptionalBuffer(*const Buf));
+    try std.testing.expect(!isOptionalBuffer(?*const u8));
+    try std.testing.expect(!isOptionalBuffer(?f32));
+}
+
 test "enum defines key is hashable for variants" {
     const MODE = enum {
         _0,
@@ -387,6 +441,36 @@ test "enum defines key is hashable for variants" {
     try map.put(alloc, .{}, 7);
     try std.testing.expectEqual(@as(u32, 7), map.get(.{}) orelse 0);
     try std.testing.expectEqualStrings("1", (Defines{ .MODE = ._1 }).MODE.text());
+}
+
+test "generated nullable uniform shape with variant splice" {
+    // Mirrors the descriptor generator output: optional resources default
+    // to null, numerics to zeroes, `_pending` builds from `.{}`.
+    const FakeShader = struct {
+        pub const Uniform = struct {
+            uMvp: f32 = @import("std").mem.zeroes(f32),
+            uTex: ?*const Texture = null,
+        };
+        pub const EnumDefines = struct {};
+        const template_src: []const u8 = "#define ENUM_MODE 0\nuniform sampler2D uTex;\n";
+        const define_slots = [_]DefineSlot{.{ .offset = 18, .len = 1 }};
+        var variants: std.AutoHashMapUnmanaged(EnumDefines, u32) = .empty;
+    };
+    const alloc = std.testing.allocator;
+    const u: FakeShader.Uniform = .{};
+    try std.testing.expectEqual(@as(f32, 0), u.uMvp);
+    try std.testing.expect(u.uTex == null);
+    const pending: FakeShader.Uniform = .{};
+    try std.testing.expect(pending.uTex == null);
+    const texts = [_][]const u8{"1"};
+    const src = try buildVariantSrc(alloc, FakeShader.template_src, &FakeShader.define_slots, &texts);
+    defer alloc.free(src);
+    try std.testing.expectEqualStrings("#define ENUM_MODE 1\nuniform sampler2D uTex;\n", src);
+    var map: std.AutoHashMapUnmanaged(FakeShader.EnumDefines, u32) = .empty;
+    defer map.deinit(alloc);
+    try map.put(alloc, .{}, 11);
+    try std.testing.expectEqual(@as(u32, 11), map.get(.{}) orelse 0);
+    _ = FakeShader.variants;
 }
 
 test "buildVariantSrc splices texts into slots" {

@@ -126,10 +126,10 @@ fn uploadFragUniform(comptime Prog: type, program: u32, frag_uniform: Prog.Frag.
 ///   The owner must expose `Uniform`, `IdCache`, `instance`, `edit`,
 ///   `Editor` with `setUniform`/`apply`.
 /// - vert_uniform_value: default vertex uniform value of type `vert_uniform`.
-///   Must be comptime-known plain data; resource bindings
-///   (`*const Texture`, uniform-block buffers) cannot be comptime
-///   defaults — pass `undefined` for them and assign on the instance
-///   before `use()`.
+///   Generated `Uniform` structs carry field defaults (numerics zeroed,
+///   `?*const Texture` / `?*const Buffer` resources `null`), so a partial
+///   literal like `.{ .uMvp = mvp }` or even `.{}` compiles; `null`
+///   resources explicitly unbind on `use()`.
 /// - frag_uniform: fragment `Uniform` type with the same rules as above.
 /// - frag_uniform_value: default fragment uniform value of type `frag_uniform`.
 ///
@@ -138,9 +138,9 @@ fn uploadFragUniform(comptime Prog: type, program: u32, frag_uniform: Prog.Frag.
 ///
 /// Example:
 /// ```zig
-/// const M = Material(MyVert.Uniform, .{ .uMvp = mvp, .uTex = undefined }, MyFrag.Uniform, .{ .uColor = white });
+/// const M = Material(MyVert.Uniform, .{ .uMvp = mvp }, MyFrag.Uniform, .{ .uColor = white });
 /// var m: M = .{};
-/// m.vertUniform.uTex = &tex;
+/// m.vertUniform.uTex = &tex; // or leave null to unbind
 /// m.vertDefines.MODE = ._1;
 /// try m.use(allocator);
 /// ```
@@ -434,10 +434,11 @@ const DummyVertUniform = struct {
     pub const Owner = DummyVert;
     uA: f32,
     uB: i32,
+    uTex: ?*const u8 = null,
 };
 const DummyVert = struct {
     pub const Uniform = DummyVertUniform;
-    pub const IdCache = struct { uA: i32, uB: i32 };
+    pub const IdCache = struct { uA: i32, uB: i32, uTex: i32 };
     pub const MODE = DummyVertMode;
     pub const EnumDefines = struct {
         MODE: MODE = ._0,
@@ -538,6 +539,22 @@ test "vertex material from uniform type and default" {
 
     try std.testing.expect(MV.getVertUniformFieldId("nope", f32) == null);
     try std.testing.expectError(error.UnknownFieldId, self.getVertUniformData(99, f32));
+}
+
+test "material nullable resource defaults and null roundtrip" {
+    const M = Material(DummyVert.Uniform, .{ .uA = 1.0, .uB = 2 }, DummyFrag.Uniform, .{ .uC = 3 });
+    var self: M = .{};
+    try std.testing.expect(self.vertUniform.uTex == null);
+    const tid = M.getVertUniformFieldId("uTex", ?*const u8) orelse unreachable;
+    try self.setVertUniformData(tid, @as(?*const u8, null));
+    try std.testing.expect((try self.getVertUniformData(tid, ?*const u8)) == null);
+    var x: u8 = 7;
+    try self.setVertUniformData(tid, @as(?*const u8, &x));
+    const back = try self.getVertUniformData(tid, ?*const u8);
+    try std.testing.expect(back != null);
+    try std.testing.expectEqual(@as(u8, 7), back.?.*);
+    // Plain (non-optional) type does not match the optional field.
+    try std.testing.expect(M.getVertUniformFieldId("uTex", *const u8) == null);
 }
 
 test "material defines default and field access" {

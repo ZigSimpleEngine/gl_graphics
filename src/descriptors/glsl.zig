@@ -69,6 +69,8 @@ pub const GlslDescriptor = struct {
         const structs = try common.parseStructs(allocator, no_comments);
         defer common.freeStructs(allocator, structs);
 
+        try common.validateStructMembers(allocator, structs, &.{});
+
         var inner = std.ArrayList(u8).empty;
         defer inner.deinit(allocator);
 
@@ -82,23 +84,15 @@ pub const GlslDescriptor = struct {
                 for (s.fields) |f| {
                     const zig_type = try common.mapGLSLTypeToZig(allocator, f.typ);
                     defer allocator.free(zig_type);
-                    try inner.appendSlice(allocator, "        ");
-                    try inner.appendSlice(allocator, f.name);
-                    try inner.appendSlice(allocator, ": ");
-                    if (f.is_array) {
-                        if (f.array_len) |len| {
-                            const tmp = try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
-                            defer allocator.free(tmp);
-                            try inner.appendSlice(allocator, tmp);
-                        } else {
-                            const tmp = try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
-                            defer allocator.free(tmp);
-                            try inner.appendSlice(allocator, tmp);
-                        }
-                    } else {
-                        try inner.appendSlice(allocator, zig_type);
-                    }
-                    try inner.appendSlice(allocator, ",\n");
+                    const full_type: []u8 = if (f.is_array) blk: {
+                        if (f.array_len) |len| break :blk try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
+                        break :blk try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
+                    } else try allocator.dupe(u8, zig_type);
+                    defer allocator.free(full_type);
+                    // .glsl structs hold numeric/nested data only (opaque and
+                    // block members are rejected by validateStructMembers),
+                    // so a recursive zeroes default is safe at every level.
+                    try common.appendGeneratedField(allocator, &inner, "        ", f.name, full_type, false);
                 }
                 try inner.appendSlice(allocator, "    };\n");
             }

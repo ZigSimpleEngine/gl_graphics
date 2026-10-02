@@ -728,7 +728,10 @@ fn processShaderFile(
             continue;
         }
         if (std.mem.startsWith(u8, trimmed, "#version")) continue;
-        try out.appendSlice(allocator, line);
+        // Normalize CRLF: byte offsets in the combined source (ENUM_ slots)
+        // must match the template, which never contains '\r'.
+        const no_cr = if (line.len > 0 and line[line.len - 1] == '\r') line[0 .. line.len - 1] else line;
+        try out.appendSlice(allocator, no_cr);
         try out.append(allocator, '\n');
     }
 }
@@ -760,7 +763,8 @@ pub fn resolveShaderIncludes(
         while (it.next()) |line| {
             const trimmed = std.mem.trim(u8, line, &[_]u8{ ' ', '\t', '\r' });
             if (std.mem.startsWith(u8, trimmed, "#version")) {
-                try out.appendSlice(allocator, line);
+                const no_cr = if (line.len > 0 and line[line.len - 1] == '\r') line[0 .. line.len - 1] else line;
+                try out.appendSlice(allocator, no_cr);
                 try out.append(allocator, '\n');
                 break;
             }
@@ -1220,6 +1224,111 @@ pub fn appendZigStringLiteral(allocator: std.mem.Allocator, out: *std.ArrayList(
     try out.append(allocator, '"');
 }
 
+/// Emits one generated struct field with a default value.
+/// Resource fields (`optional_resource`) become `name: ?Base = null`;
+/// everything else (scalars, math, nested custom structs — GLSL structs
+/// hold no resources, so zeroes is safe) becomes
+/// `name: Base = @import("std").mem.zeroes(Base)`.
+/// `base_type` must be the full type expression (arrays included).
+pub fn appendGeneratedField(
+    allocator: std.mem.Allocator,
+    out: *std.ArrayList(u8),
+    indent: []const u8,
+    name: []const u8,
+    base_type: []const u8,
+    optional_resource: bool,
+) !void {
+    try out.appendSlice(allocator, indent);
+    try out.appendSlice(allocator, name);
+    try out.appendSlice(allocator, ": ");
+    if (optional_resource) {
+        try out.append(allocator, '?');
+        try out.appendSlice(allocator, base_type);
+        try out.appendSlice(allocator, " = null,\n");
+    } else {
+        try out.appendSlice(allocator, base_type);
+        try out.appendSlice(allocator, " = @import(\"std\").mem.zeroes(");
+        try out.appendSlice(allocator, base_type);
+        try out.appendSlice(allocator, "),\n");
+    }
+}
+
+/// Errors for struct member validation.
+/// Returned from `validateStructMembers` with a `std.debug.print` hint
+/// (print, not log.err, so tests expecting errors do not fail the runner).
+pub const StructMemberError = error{
+    /// A struct member (direct or nested) uses an opaque GLSL type.
+    OpaqueStructMember,
+    /// A struct member uses a uniform block type.
+    BlockStructMember,
+};
+
+/// Returns true for GLSL opaque types that can never live in a struct
+/// uploaded by the runtime: samplers, images and atomic counters.
+fn isOpaqueMemberType(typ: []const u8) bool {
+    if (isSamplerType(typ)) return true;
+    if (std.mem.startsWith(u8, typ, "image")) return true;
+    if (std.mem.eql(u8, typ, "atomic_uint")) return true;
+    return false;
+}
+
+/// Recursively checks one struct's members for opaque/block types.
+/// `path` holds the current DFS chain for cycle protection.
+fn checkStructMembers(
+    allocator: std.mem.Allocator,
+    by_name: *const std.StringHashMap(*const StructDef),
+    block_types: []const []const u8,
+    s: *const StructDef,
+    path: *std.ArrayList([]const u8),
+) (StructMemberError || std.mem.Allocator.Error)!void {
+    for (path.items) |n| {
+        if (std.mem.eql(u8, n, s.name)) return;
+    }
+    try path.append(allocator, s.name);
+    defer _ = path.pop();
+    for (s.fields) |*f| {
+        if (isOpaqueMemberType(f.typ)) {
+            std.debug.print("STRUCT_: struct '{s}' member '{s}' has opaque type '{s}'. Opaque types (samplers, images, atomics) cannot be struct members: the runtime never uploads them and strict drivers reject the shader. Keep resources as flat top-level uniforms (e.g. `uniform sampler2D uTex;`) and numeric-only data in structs.\n", .{ s.name, f.name, f.typ });
+            return error.OpaqueStructMember;
+        }
+        for (block_types) |b| {
+            if (!std.mem.eql(u8, b, f.typ)) continue;
+            std.debug.print("STRUCT_: struct '{s}' member '{s}' uses uniform block type '{s}'. Uniform blocks cannot be struct members: bind them as flat top-level `uniform {s} {{ ... }} instance;` uniforms instead.\n", .{ s.name, f.name, f.typ, f.typ });
+            return error.BlockStructMember;
+        }
+        if (by_name.get(f.typ)) |nested| {
+            try checkStructMembers(allocator, by_name, block_types, nested, path);
+        }
+    }
+}
+
+/// Validates that no struct member — directly or transitively through nested
+/// structs — uses an opaque GLSL type (`sampler*`, `image*`, `atomic_uint`)
+/// or a uniform block type. Such members can neither be uploaded by the
+/// runtime (`flattenUniforms` skips pointer leaves) nor compiled by strict
+/// drivers, so they are rejected at asset compile time with a usage hint.
+/// Parameters:
+/// - allocator: allocator for internal index/path.
+/// - structs: parsed struct definitions (borrowed).
+/// - block_types: uniform block type names in scope (borrowed).
+///
+/// Returns: `OpaqueStructMember` / `BlockStructMember` on violation.
+pub fn validateStructMembers(
+    allocator: std.mem.Allocator,
+    structs: []const StructDef,
+    block_types: []const []const u8,
+) (StructMemberError || std.mem.Allocator.Error)!void {
+    var by_name = std.StringHashMap(*const StructDef).init(allocator);
+    defer by_name.deinit();
+    for (structs) |*s| try by_name.put(s.name, s);
+    var path = std.ArrayList([]const u8).empty;
+    defer path.deinit(allocator);
+    for (structs) |*s| {
+        path.clearRetainingCapacity();
+        try checkStructMembers(allocator, &by_name, block_types, s, &path);
+    }
+}
+
 /// Generates Zig declarations for `ENUM_` variants into `inner`:
 /// one `pub const <SUFFIX>` enum per define (with `text()` returning the
 /// original GLSL token), `pub const EnumDefines` with defaults from the
@@ -1394,6 +1503,114 @@ test "enum defines hex no normalization and negative" {
     try std.testing.expectEqualStrings("_0x10", defs[0].values[0].tag);
     try std.testing.expectEqualStrings("_16", defs[0].values[1].tag);
     try std.testing.expectEqualStrings("_m12", defs[0].values[2].tag);
+}
+
+test "appendGeneratedField emits null and zeroes defaults" {
+    const alloc = std.testing.allocator;
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(alloc);
+    try appendGeneratedField(alloc, &out, "    ", "uTex", "*const @import(\"gl_graphics\").Texture", true);
+    try appendGeneratedField(alloc, &out, "    ", "uMvp", "f32", false);
+    try appendGeneratedField(alloc, &out, "    ", "uArr", "[4]f32", false);
+    const code = try out.toOwnedSlice(alloc);
+    defer alloc.free(code);
+    try std.testing.expectEqualStrings(
+        "    uTex: ?*const @import(\"gl_graphics\").Texture = null,\n" ++
+            "    uMvp: f32 = @import(\"std\").mem.zeroes(f32),\n" ++
+            "    uArr: [4]f32 = @import(\"std\").mem.zeroes([4]f32),\n",
+        code,
+    );
+}
+
+/// Builds one owned struct-member field for validator tests.
+fn testStructField(allocator: std.mem.Allocator, typ: []const u8, name: []const u8) !FieldDef {
+    return .{ .typ = try allocator.dupe(u8, typ), .name = try allocator.dupe(u8, name) };
+}
+
+/// Builds one owned struct definition for validator tests.
+fn testStructDef(allocator: std.mem.Allocator, name: []const u8, member_types: []const []const u8) !StructDef {
+    const fields = try allocator.alloc(FieldDef, member_types.len);
+    errdefer allocator.free(fields);
+    for (member_types, 0..) |t, i| fields[i] = try testStructField(allocator, t, "m");
+    return .{ .name = try allocator.dupe(u8, name), .fields = fields };
+}
+
+fn freeTestStructDef(allocator: std.mem.Allocator, s: *StructDef) void {
+    for (s.fields) |*f| {
+        allocator.free(f.typ);
+        allocator.free(f.name);
+    }
+    allocator.free(s.fields);
+    allocator.free(s.name);
+}
+
+test "validateStructMembers accepts numeric and nested structs" {
+    const alloc = std.testing.allocator;
+    var light = try testStructDef(alloc, "Light", &.{ "vec3", "float" });
+    defer freeTestStructDef(alloc, &light);
+    var mat = try testStructDef(alloc, "Material", &.{ "vec4", "Light" });
+    defer freeTestStructDef(alloc, &mat);
+    const defs = [_]StructDef{ light, mat };
+    try validateStructMembers(alloc, &defs, &.{});
+}
+
+test "validateStructMembers rejects opaque and block members" {
+    const alloc = std.testing.allocator;
+    // Direct sampler member.
+    {
+        var bad = try testStructDef(alloc, "Bad", &.{"sampler2D"});
+        defer freeTestStructDef(alloc, &bad);
+        const defs = [_]StructDef{bad};
+        try std.testing.expectError(error.OpaqueStructMember, validateStructMembers(alloc, &defs, &.{}));
+    }
+    // Sampler array, image and atomic members.
+    {
+        var bad = try testStructDef(alloc, "Bad2", &.{ "samplerCube", "image2D", "atomic_uint" });
+        defer freeTestStructDef(alloc, &bad);
+        const defs = [_]StructDef{bad};
+        try std.testing.expectError(error.OpaqueStructMember, validateStructMembers(alloc, &defs, &.{}));
+    }
+    // Transitive: holder -> inner with sampler.
+    {
+        var inner = try testStructDef(alloc, "Inner", &.{"sampler2D"});
+        defer freeTestStructDef(alloc, &inner);
+        var holder = try testStructDef(alloc, "Holder", &.{"Inner"});
+        defer freeTestStructDef(alloc, &holder);
+        const defs = [_]StructDef{ inner, holder };
+        try std.testing.expectError(error.OpaqueStructMember, validateStructMembers(alloc, &defs, &.{}));
+    }
+    // Uniform block type member.
+    {
+        var s = try testStructDef(alloc, "S", &.{"MyBlock"});
+        defer freeTestStructDef(alloc, &s);
+        const defs = [_]StructDef{s};
+        const blocks = [_][]const u8{"MyBlock"};
+        try std.testing.expectError(error.BlockStructMember, validateStructMembers(alloc, &defs, &blocks));
+    }
+}
+
+test "enum defines slots survive CRLF normalization" {
+    // Regression: sources with CRLF endings used to shift every slot by
+    // the number of preceding '\r' (template drops '\r', parser did not),
+    // corrupting the variant (e.g. `uniform` -> `TRUEform`) and failing
+    // driver compilation. resolveShaderIncludes now strips trailing '\r'.
+    const alloc = std.testing.allocator;
+    const crlf_src = "#version 300 es\r\n#define ENUM_MODE 0\r\n#if ENUM_MODE == 1\r\n#endif\r\nvoid main() {}\r\n";
+    var combined = std.ArrayList(u8).empty;
+    defer combined.deinit(alloc);
+    var visited = std.StringHashMap(void).init(alloc);
+    defer visited.deinit();
+    var link_map = std.StringHashMap([]u8).init(alloc);
+    defer link_map.deinit();
+    // No IO needed: no #include directives, readNodeFile never called.
+    try resolveShaderIncludes(alloc, undefined, &combined, crlf_src, "test.frag", &visited, &link_map);
+    const template = try combined.toOwnedSlice(alloc);
+    defer alloc.free(template);
+    try std.testing.expect(std.mem.indexOf(u8, template, "\r") == null);
+    const defs = try parseEnumDefines(alloc, template);
+    defer freeEnumDefines(alloc, defs);
+    try std.testing.expectEqual(@as(usize, 1), defs.len);
+    try std.testing.expectEqualStrings("0", template[defs[0].slot_offset .. defs[0].slot_offset + defs[0].slot_len]);
 }
 
 test "enum defines codegen emits template and slots" {

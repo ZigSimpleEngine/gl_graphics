@@ -17,7 +17,8 @@ fn linkProgram(vs_id: u32, fs_id: ?u32) u32 {
     gl.programs.getParameter(prog_id, .link_status, @ptrCast(&ok));
     if (ok == 0) {
         var log: [512]u8 = undefined;
-        _ = gl.programs.getInfoLog(prog_id, &log);
+        const len = gl.programs.getInfoLog(prog_id, &log);
+        std.debug.print("GLSL program link failed (id={}, vs={}, fs={?}):\n{s}\n", .{ prog_id, vs_id, fs_id, log[0..@min(len, log.len)] });
     }
     return prog_id;
 }

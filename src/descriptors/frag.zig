@@ -83,6 +83,11 @@ pub const FragmentDescriptor = struct {
         const uniforms = try common.parseUniforms(allocator, no_comments);
         defer common.freeUniforms(allocator, uniforms);
 
+        var block_types = std.ArrayList([]const u8).empty;
+        defer block_types.deinit(allocator);
+        for (uniforms) |u| if (u.kind == .block) try block_types.append(allocator, u.glsl_type);
+        try common.validateStructMembers(allocator, structs, block_types.items);
+
         const enum_defs = try common.parseEnumDefines(allocator, combined_slice);
         defer common.freeEnumDefines(allocator, enum_defs);
 
@@ -111,21 +116,12 @@ pub const FragmentDescriptor = struct {
                 for (s.fields) |f| {
                     const zig_type = try common.mapGLSLTypeToZig(allocator, f.typ);
                     defer allocator.free(zig_type);
-                    try inner.appendSlice(allocator, "        ");
-                    try inner.appendSlice(allocator, f.name);
-                    try inner.appendSlice(allocator, ": ");
-                    if (f.is_array) {
-                        if (f.array_len) |len| {
-                            const tmp = try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
-                            defer allocator.free(tmp);
-                            try inner.appendSlice(allocator, tmp);
-                        } else {
-                            const tmp = try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
-                            defer allocator.free(tmp);
-                            try inner.appendSlice(allocator, tmp);
-                        }
-                    } else try inner.appendSlice(allocator, zig_type);
-                    try inner.appendSlice(allocator, ",\n");
+                    const full_type: []u8 = if (f.is_array) blk: {
+                        if (f.array_len) |len| break :blk try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
+                        break :blk try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
+                    } else try allocator.dupe(u8, zig_type);
+                    defer allocator.free(full_type);
+                    try common.appendGeneratedField(allocator, &inner, "        ", f.name, full_type, false);
                 }
                 try inner.appendSlice(allocator, "    };\n");
             }
@@ -140,21 +136,12 @@ pub const FragmentDescriptor = struct {
                 if (u.block_fields) |fields| for (fields) |f| {
                     const zig_type = try common.mapGLSLTypeToZig(allocator, f.typ);
                     defer allocator.free(zig_type);
-                    try inner.appendSlice(allocator, "        ");
-                    try inner.appendSlice(allocator, f.name);
-                    try inner.appendSlice(allocator, ": ");
-                    if (f.is_array) {
-                        if (f.array_len) |len| {
-                            const tmp = try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
-                            defer allocator.free(tmp);
-                            try inner.appendSlice(allocator, tmp);
-                        } else {
-                            const tmp = try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
-                            defer allocator.free(tmp);
-                            try inner.appendSlice(allocator, tmp);
-                        }
-                    } else try inner.appendSlice(allocator, zig_type);
-                    try inner.appendSlice(allocator, ",\n");
+                    const full_type: []u8 = if (f.is_array) blk: {
+                        if (f.array_len) |len| break :blk try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
+                        break :blk try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
+                    } else try allocator.dupe(u8, zig_type);
+                    defer allocator.free(full_type);
+                    try common.appendGeneratedField(allocator, &inner, "        ", f.name, full_type, false);
                 };
                 try inner.appendSlice(allocator, "    };\n");
             }
@@ -180,6 +167,7 @@ pub const FragmentDescriptor = struct {
         defer allocator.free(owner_line);
         try uniform_outer.appendSlice(allocator, owner_line);
         for (uniforms) |u| {
+            const is_resource = u.kind == .block or u.is_sampler;
             const zig_type_raw: []u8 = blk: {
                 if (u.kind == .block) {
                     const inner_t = try common.mapGLSLTypeToZig(allocator, u.glsl_type);
@@ -190,11 +178,7 @@ pub const FragmentDescriptor = struct {
                 else break :blk try common.mapGLSLTypeToZig(allocator, u.glsl_type);
             };
             defer allocator.free(zig_type_raw);
-            try uniform_outer.appendSlice(allocator, "    ");
-            try uniform_outer.appendSlice(allocator, u.name);
-            try uniform_outer.appendSlice(allocator, ": ");
-            try uniform_outer.appendSlice(allocator, zig_type_raw);
-            try uniform_outer.appendSlice(allocator, ",\n");
+            try common.appendGeneratedField(allocator, &uniform_outer, "    ", u.name, zig_type_raw, is_resource);
         }
         try uniform_outer.appendSlice(allocator, "};\n");
         try inner.appendSlice(allocator, "    pub const Uniform = ");
@@ -236,7 +220,7 @@ pub const FragmentDescriptor = struct {
 
         try inner.appendSlice(allocator, "    pub const Editor = struct {\n");
         try inner.appendSlice(allocator, "        _program: u32,\n");
-        try inner.appendSlice(allocator, "        _pending: Uniform = undefined,\n");
+        try inner.appendSlice(allocator, "        _pending: Uniform = .{},\n");
         if (uniforms.len == 0) {
             try inner.appendSlice(allocator, "        _dirty: struct {} = .{},\n");
         } else {
@@ -256,8 +240,8 @@ pub const FragmentDescriptor = struct {
                 if (u.kind == .block) {
                     const inner_t = try common.mapGLSLTypeToZig(allocator, u.glsl_type);
                     defer allocator.free(inner_t);
-                    break :blk try std.fmt.allocPrint(allocator, "*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
-                } else if (u.is_sampler) break :blk try allocator.dupe(u8, "*const @import(\"gl_graphics\").Texture")
+                    break :blk try std.fmt.allocPrint(allocator, "?*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
+                } else if (u.is_sampler) break :blk try allocator.dupe(u8, "?*const @import(\"gl_graphics\").Texture")
                 else if (struct_map.contains(u.glsl_type)) break :blk try allocator.dupe(u8, u.glsl_type)
                 else break :blk try common.mapGLSLTypeToZig(allocator, u.glsl_type);
             };

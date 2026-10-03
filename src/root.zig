@@ -319,7 +319,8 @@ test "framebuffer and camera cached paths without GL" {
     const C = Camera(f32);
     const cam = try C.create(allocator);
     defer cam.destroy(allocator);
-    _ = cam.getFovY();
+    _ = cam.getFovYRad();
+    _ = cam.getFovYDeg();
     _ = cam.getAspect();
     _ = cam.getNear();
     _ = cam.getFar();
@@ -329,9 +330,13 @@ test "framebuffer and camera cached paths without GL" {
     _ = cam.getViewport();
     _ = cam.isPerspective();
     _ = cam.isOrtho();
-    cam.edit().setFovY(1.0).setAspect(1.5).setNear(0.1).setFar(100.0).apply();
-    try std.testing.expectEqual(@as(f32, 1.0), cam.getFovY());
-    cam.edit().setPerspective(0.9, 1.4, 0.2, 200.0).apply();
+    cam.edit().setFovYRad(1.0).setAspect(1.5).setNear(0.1).setFar(100.0).apply();
+    try std.testing.expectEqual(@as(f32, 1.0), cam.getFovYRad());
+    cam.edit().setFovYDeg(60.0).apply();
+    try std.testing.expectApproxEqAbs(@as(f32, 60.0), cam.getFovYDeg(), 1e-5);
+    cam.edit().setPerspectiveRad(0.9, 1.4, 0.2, 200.0).apply();
+    cam.edit().setPerspectiveDeg(60.0, 1.4, 0.2, 200.0).apply();
+    try std.testing.expectApproxEqAbs(@as(f32, 60.0), cam.getFovYDeg(), 1e-5);
     cam.edit().setOrtho(-1, 1, -1, 1, 0.1, 100.0).apply();
     // GL-touching: analyze only.
     _ = &C.use;

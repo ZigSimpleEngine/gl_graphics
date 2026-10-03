@@ -99,7 +99,7 @@ pub fn Camera(comptime scalar_type_: type) type {
                 const aspect: f32 = @floatCast(m.aspect);
                 const near: f32 = @floatCast(m.near);
                 const far: f32 = @floatCast(m.far);
-                const p = math.mat.perspective(fov, aspect, near, far);
+                const p = math.mat.perspectiveRad(fov, aspect, near, far);
                 m.projection = castMat4Outer(p);
             } else {
                 const l: f32 = @floatCast(m.ortho_left);
@@ -175,14 +175,24 @@ pub fn Camera(comptime scalar_type_: type) type {
             allocator.destroy(self.impl());
         }
 
-        /// Returns the vertical field of view.
+        /// Returns the vertical field of view in radians.
         ///
         /// Parameters:
         /// - `self` — parameter `self`.
         ///
         /// Returns: `Scalar`.
-        pub fn getFovY(self: *const Self) Scalar {
+        pub fn getFovYRad(self: *const Self) Scalar {
             return self.implConst().fov_y;
+        }
+
+        /// Returns the vertical field of view in degrees.
+        ///
+        /// Parameters:
+        /// - `self` — parameter `self`.
+        ///
+        /// Returns: `Scalar`.
+        pub fn getFovYDeg(self: *const Self) Scalar {
+            return math.scalar.degrees(self.implConst().fov_y);
         }
 
         /// Returns the aspect ratio.
@@ -343,15 +353,27 @@ pub fn Camera(comptime scalar_type_: type) type {
                 return .{ ._camera = camera };
             }
 
-            /// Sets the pending `fov_y`.
+            /// Sets the pending `fov_y` in radians.
             ///
             /// Parameters:
             /// - `self` — parameter `self`.
             /// - `v` — parameter `v`.
             ///
             /// Returns: `*const`.
-            pub fn setFovY(self: *const Editor, v: Scalar) *const Editor {
+            pub fn setFovYRad(self: *const Editor, v: Scalar) *const Editor {
                 @constCast(self)._pending_fov_y = v;
+                return @constCast(self);
+            }
+
+            /// Sets the pending `fov_y` in degrees.
+            ///
+            /// Parameters:
+            /// - `self` — parameter `self`.
+            /// - `v` — parameter `v`.
+            ///
+            /// Returns: `*const`.
+            pub fn setFovYDeg(self: *const Editor, v: Scalar) *const Editor {
+                @constCast(self)._pending_fov_y = math.scalar.radians(v);
                 return @constCast(self);
             }
 
@@ -391,7 +413,7 @@ pub fn Camera(comptime scalar_type_: type) type {
                 return @constCast(self);
             }
 
-            /// Sets a perspective projection.
+            /// Sets a perspective projection with `fov_y` in radians.
             ///
             /// Parameters:
             /// - `self` — parameter `self`.
@@ -401,13 +423,27 @@ pub fn Camera(comptime scalar_type_: type) type {
             /// - `far` — parameter `far`.
             ///
             /// Returns: `*const`.
-            pub fn setPerspective(self: *const Editor, fov_y: Scalar, aspect: Scalar, near: Scalar, far: Scalar) *const Editor {
+            pub fn setPerspectiveRad(self: *const Editor, fov_y: Scalar, aspect: Scalar, near: Scalar, far: Scalar) *const Editor {
                 @constCast(self)._pending_perspective = true;
                 @constCast(self)._pending_fov_y = fov_y;
                 @constCast(self)._pending_aspect = aspect;
                 @constCast(self)._pending_near = near;
                 @constCast(self)._pending_far = far;
                 return @constCast(self);
+            }
+
+            /// Sets a perspective projection with `fov_y` in degrees.
+            ///
+            /// Parameters:
+            /// - `self` — parameter `self`.
+            /// - `fov_y` — parameter `fov_y`.
+            /// - `aspect` — parameter `aspect`.
+            /// - `near` — parameter `near`.
+            /// - `far` — parameter `far`.
+            ///
+            /// Returns: `*const`.
+            pub fn setPerspectiveDeg(self: *const Editor, fov_y: Scalar, aspect: Scalar, near: Scalar, far: Scalar) *const Editor {
+                return @constCast(self).setPerspectiveRad(math.scalar.radians(fov_y), aspect, near, far);
             }
 
             /// Sets an orthographic projection.

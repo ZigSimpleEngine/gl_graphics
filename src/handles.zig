@@ -1465,6 +1465,48 @@ pub const AnyMaterial = struct {
         try gpu_meta.readField(@ptrCast(raw.ptr), self.frag_fields.fields[field_id], gpu_meta.typeId(T), std.mem.asBytes(&out));
         return out;
     }
+    /// Writes one cached uniform field by pre-resolved ids, trying the vertex
+    /// stage first and then the fragment stage. Each non-null id is written
+    /// independently: a failure on one stage does not block the other.
+    /// Parameters:
+    /// - vert_field_id: id from `getVertUniformFieldId`, or null to skip vert.
+    /// - frag_field_id: id from `getFragUniformFieldId`, or null to skip frag.
+    /// - data: value whose type must match the field type.
+    ///
+    /// Returns: true when at least one stage was written, false otherwise
+    /// (both ids null, or no write succeeded).
+    pub fn trySetUniformDataById(self: *AnyMaterial, vert_field_id: ?u32, frag_field_id: ?u32, data: anytype) bool {
+        var written = false;
+        if (vert_field_id) |id| {
+            blk: {
+                self.setVertUniformData(id, data) catch break :blk;
+                written = true;
+            }
+        }
+        if (frag_field_id) |id| {
+            blk: {
+                self.setFragUniformData(id, data) catch break :blk;
+                written = true;
+            }
+        }
+        return written;
+    }
+    /// Writes a cached uniform field by name to every stage that declares it
+    /// with a matching type (vertex and/or fragment). Convenience wrapper over
+    /// `getVertUniformFieldId`/`getFragUniformFieldId` plus `trySetUniformDataById`,
+    /// so callers no longer need the `if (getId) |id| { try setData }` pattern
+    /// per stage.
+    /// Parameters:
+    /// - name: uniform field name looked up in both stages.
+    /// - data: value whose type must match the field type; `@TypeOf(data)`
+    ///   is used for the id lookup.
+    ///
+    /// Returns: true when at least one stage was written, false when the name
+    /// is missing on both stages (or its type does not match).
+    pub fn trySetUniformDataByName(self: *AnyMaterial, name: []const u8, data: anytype) bool {
+        const T = @TypeOf(data);
+        return self.trySetUniformDataById(self.getVertUniformFieldId(name, T), self.getFragUniformFieldId(name, T), data);
+    }
     /// Writes one cached vertex defines field by id (uploaded on `use` via variant).
     pub fn setVertDefinesData(self: *AnyMaterial, field_id: u32, data: anytype) gpu_meta.ResourceError!void {
         if (field_id >= self.vert_defines_fields.fields.len) return error.UnknownFieldId;
@@ -2082,6 +2124,76 @@ test "any vertex material wrap without GL" {
 
     try rec.use(alloc);
     try std.testing.expect(m.used);
+}
+
+test "any material trySetUniform helpers without GL" {
+    // Full material: ByName writes only the stage(s) declaring the name.
+    var m: FakeMat = .{ .vertUniform = .{ .uMvp = 1.0, .uFlag = false }, .fragUniform = .{ .uColor = 0.5 }, .used = false };
+    var rec = AnyMaterial.wrap(&m);
+
+    // Vert-only name: writes vert, leaves frag untouched.
+    try std.testing.expect(rec.trySetUniformDataByName("uMvp", @as(f32, 2.0)));
+    try std.testing.expectEqual(@as(f32, 2.0), m.vertUniform.uMvp);
+    try std.testing.expectEqual(@as(f32, 0.5), m.fragUniform.uColor);
+
+    // Frag-only name: writes frag.
+    try std.testing.expect(rec.trySetUniformDataByName("uColor", @as(f32, 0.25)));
+    try std.testing.expectEqual(@as(f32, 0.25), m.fragUniform.uColor);
+
+    // Missing name and type mismatch: no write, false.
+    try std.testing.expect(!rec.trySetUniformDataByName("nope", @as(f32, 1.0)));
+    try std.testing.expect(!rec.trySetUniformDataByName("uMvp", true));
+    try std.testing.expectEqual(@as(f32, 2.0), m.vertUniform.uMvp);
+
+    // ById with pre-resolved ids: one stage, both null, bad id, type mismatch.
+    const v_mvp = rec.getVertUniformFieldId("uMvp", f32);
+    const f_color = rec.getFragUniformFieldId("uColor", f32);
+    try std.testing.expect(rec.trySetUniformDataById(v_mvp, null, @as(f32, 3.0)));
+    try std.testing.expectEqual(@as(f32, 3.0), m.vertUniform.uMvp);
+    try std.testing.expect(rec.trySetUniformDataById(null, f_color, @as(f32, 0.75)));
+    try std.testing.expectEqual(@as(f32, 0.75), m.fragUniform.uColor);
+    try std.testing.expect(!rec.trySetUniformDataById(null, null, @as(f32, 9.0)));
+    try std.testing.expect(!rec.trySetUniformDataById(99, null, @as(f32, 9.0)));
+    try std.testing.expect(!rec.trySetUniformDataById(v_mvp, null, true));
+    try std.testing.expectEqual(@as(f32, 3.0), m.vertUniform.uMvp);
+
+    // Broadcast: the same name in both stages is written twice by one call.
+    const SharedVertU = struct { uMvp: f32 };
+    const SharedFragU = struct { uMvp: f32 };
+    const SharedMat = struct {
+        pub const VertUniformT = SharedVertU;
+        pub const FragUniformT = SharedFragU;
+        pub const ShaderProgram = FakeProgM;
+        vertUniform: SharedVertU,
+        fragUniform: SharedFragU,
+        vertDefines: FakeProgM.VertDefines = .{},
+        fragDefines: FakeProgM.FragDefines = .{},
+        used: bool = false,
+        pub fn use(self: *@This(), _: std.mem.Allocator) !void {
+            self.used = true;
+        }
+    };
+    var sm: SharedMat = .{ .vertUniform = .{ .uMvp = 1.0 }, .fragUniform = .{ .uMvp = 1.0 } };
+    var srec = AnyMaterial.wrap(&sm);
+    try std.testing.expect(srec.trySetUniformDataByName("uMvp", @as(f32, 7.0)));
+    try std.testing.expectEqual(@as(f32, 7.0), sm.vertUniform.uMvp);
+    try std.testing.expectEqual(@as(f32, 7.0), sm.fragUniform.uMvp);
+    try std.testing.expect(srec.trySetUniformDataById(
+        srec.getVertUniformFieldId("uMvp", f32),
+        srec.getFragUniformFieldId("uMvp", f32),
+        @as(f32, 8.0),
+    ));
+    try std.testing.expectEqual(@as(f32, 8.0), sm.vertUniform.uMvp);
+    try std.testing.expectEqual(@as(f32, 8.0), sm.fragUniform.uMvp);
+
+    // Vertex-only material: frag side is skipped, vert still writes.
+    var vm: FakeVertMat = .{ .vertUniform = .{ .uMvp = 1.0, .uFlag = true }, .used = false };
+    var vrec = AnyMaterial.wrapVertex(&vm);
+    try std.testing.expect(vrec.trySetUniformDataByName("uMvp", @as(f32, 4.0)));
+    try std.testing.expectEqual(@as(f32, 4.0), vm.vertUniform.uMvp);
+    try std.testing.expect(!vrec.trySetUniformDataByName("uColor", @as(f32, 1.0)));
+    try std.testing.expect(vrec.trySetUniformDataById(vrec.getVertUniformFieldId("uMvp", f32), null, @as(f32, 5.0)));
+    try std.testing.expectEqual(@as(f32, 5.0), vm.vertUniform.uMvp);
 }
 
 test "asAny forwarders on concrete types without GL" {

@@ -182,8 +182,21 @@ pub const FragmentDescriptor = struct {
                 if (u.kind == .block) {
                     const inner_t = try common.mapGLSLTypeToZig(allocator, u.glsl_type);
                     defer allocator.free(inner_t);
-                    break :blk try std.fmt.allocPrint(allocator, "*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
-                } else if (u.is_sampler) break :blk try allocator.dupe(u8, "*const @import(\"gl_graphics\").Texture") else if (struct_map.contains(u.glsl_type)) break :blk try allocator.dupe(u8, u.glsl_type) else break :blk try common.mapGLSLTypeToZig(allocator, u.glsl_type);
+                    // Block struct is emitted inside the shader (`Owner.Block`),
+                    // while this Uniform lives as a sibling top-level decl,
+                    // so a bare name would not resolve: qualify through Owner.
+                    break :blk try std.fmt.allocPrint(allocator, "*const @import(\"gl_graphics\").Buffer(Owner.{s})", .{inner_t});
+                } else if (u.is_sampler) {
+                    break :blk try allocator.dupe(u8, "*const @import(\"gl_graphics\").Texture");
+                } else {
+                    if (struct_map.contains(u.glsl_type)) {
+                        // Custom struct (local or via #include) lives inside the
+                        // shader struct; qualify through Owner from the sibling.
+                        break :blk try std.fmt.allocPrint(allocator, "Owner.{s}", .{u.glsl_type});
+                    } else {
+                        break :blk try common.mapGLSLTypeToZig(allocator, u.glsl_type);
+                    }
+                }
             };
             defer allocator.free(zig_type_raw);
             try common.appendGeneratedField(allocator, &uniform_outer, "    ", u.name, zig_type_raw, is_resource);

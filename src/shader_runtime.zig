@@ -160,7 +160,7 @@ pub fn applyUniforms(
     set_all: bool,
     dirty: anytype,
 ) void {
-    inline for (@typeInfo(UniformT).@"struct".fields) |field| {
+    inline for (@typeInfo(UniformT).@"struct".fields, 0..) |field, field_i| {
         const name = field.name;
         const is_dirty = if (set_all) true else @field(dirty, name);
         if (is_dirty) {
@@ -170,7 +170,7 @@ pub fn applyUniforms(
             const loc = gl.uniforms.location(program, @ptrCast(name));
             if (comptime isOptionalSampler(T)) {
                 if (loc != -1) {
-                    const unit: u32 = 0;
+                    const unit: u32 = comptime samplerUnitFor(UniformT, field_i);
                     gl.textures.activeTexture(@enumFromInt(@intFromEnum(gl.textures.TextureUnit.texture0) + unit));
                     if (value) |tex| {
                         gl.textures.bind(.texture_2d, tex.getId());
@@ -192,7 +192,7 @@ pub fn applyUniforms(
                     }
                 }
             } else if (loc != -1 and (T == Texture or T == *const Texture or T == *Texture)) {
-                const unit: u32 = 0;
+                const unit: u32 = comptime samplerUnitFor(UniformT, field_i);
                 gl.textures.activeTexture(@enumFromInt(@intFromEnum(gl.textures.TextureUnit.texture0) + unit));
                 gl.textures.bind(.texture_2d, value.getId());
                 gl.uniforms.uniform1i(loc, @intCast(unit));
@@ -218,6 +218,19 @@ pub fn applyUniforms(
     }
     const DirtyT = @typeInfo(@TypeOf(dirty)).pointer.child;
     inline for (@typeInfo(DirtyT).@"struct".fields) |f| @field(dirty, f.name) = false;
+}
+
+/// Returns the texture unit for the sampler field at `field_i`: the count
+/// of sampler fields declared before it. Units are assigned by declaration
+/// order, so every sampler gets a stable unit regardless of dirty flags.
+fn samplerUnitFor(comptime UniformT: type, comptime field_i: usize) u32 {
+    var unit: u32 = 0;
+    inline for (@typeInfo(UniformT).@"struct".fields, 0..) |f, i| {
+        if (i >= field_i) break;
+        const FT = f.type;
+        if (comptime isOptionalSampler(FT) or FT == Texture or FT == *const Texture or FT == *Texture) unit += 1;
+    }
+    return unit;
 }
 
 /// Byte slot of one `ENUM_*` default token inside `template_src`.

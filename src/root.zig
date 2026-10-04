@@ -12,6 +12,9 @@ pub const Mesh = @import("mesh.zig").Mesh;
 /// Framebuffer — wrapper over GL FBO.
 pub const Framebuffer = @import("framebuffer.zig").Framebuffer;
 
+/// Renderbuffer — opaque wrapper over GL renderbuffer with deferred editor.
+pub const Renderbuffer = @import("renderbuffer.zig").Renderbuffer;
+
 /// Global registry by comptime name, re-exported from `core`.
 pub const Map = @import("core").Map;
 
@@ -168,6 +171,7 @@ test "smoke — texture opaque + editor chain" {
     const dummy_vert_mat: DummyVertMat = .{};
     _ = dummy_vert_mat;
     _ = Framebuffer;
+    _ = Renderbuffer;
     _ = Camera(f32);
 }
 
@@ -305,12 +309,36 @@ test "framebuffer and camera cached paths without GL" {
     try std.testing.expectEqual(@as(i32, 48), fb.getHeight());
     fb.edit().setColorAttachment(0, 7, .texture_2d, 0).apply();
     try std.testing.expectEqual(@as(?u32, 7), fb.getColorAttachment(0));
+    // Batched renderbuffers attach in a single apply (color + depth).
+    fb.edit().setRenderbuffers(&.{
+        .{ .attachment = .color_attachment0, .renderbuffer = 11 },
+        .{ .attachment = .depth_attachment, .renderbuffer = 12 },
+    }).apply();
+    try std.testing.expectEqual(@as(?u32, 11), fb.getColorAttachment(0));
+    try std.testing.expectEqual(@as(?u32, 12), fb.getDepthAttachment());
+    // Single setRenderbuffer still works and wins over the cache.
+    fb.edit().setRenderbuffer(.color_attachment1, 13).apply();
+    try std.testing.expectEqual(@as(?u32, 13), fb.getColorAttachment(1));
+    // Layered depth/stencil attachments update the cached state.
+    fb.edit().setDepthAttachmentLayer(21, 0, 3).apply();
+    try std.testing.expectEqual(@as(?u32, 21), fb.getDepthAttachment());
+    fb.edit().setStencilAttachmentLayer(22, 0, 3).apply();
+    try std.testing.expectEqual(@as(?u32, 22), fb.getStencilAttachment());
+    fb.edit().setDepthStencilAttachmentLayer(23, 0, 3).apply();
+    try std.testing.expectEqual(@as(?u32, 23), fb.getDepthStencilAttachment());
+    // Read buffer selection applies without GL (must not be dropped).
+    fb.edit().setReadBuffer(.color).apply();
+    fb.edit().setReadBuffer(.back).apply();
     // Live-GL entry points: analyze only, never execute headless.
     _ = &Framebuffer.bind;
     _ = &Framebuffer.bindTo;
     _ = &Framebuffer.use;
     _ = &Framebuffer.bindDefault;
     _ = &Framebuffer.useDefault;
+    _ = &Framebuffer.blitFrom;
+    _ = &Framebuffer.resolveFrom;
+    _ = &Framebuffer.blitToDefault;
+    _ = &Framebuffer.resolveToDefault;
     _ = &Framebuffer.getStatus;
     _ = &Framebuffer.isComplete;
     _ = &Framebuffer.getAttachmentParameter;
@@ -341,4 +369,59 @@ test "framebuffer and camera cached paths without GL" {
     // GL-touching: analyze only.
     _ = &C.use;
     _ = &C.applyViewport;
+}
+
+test "renderbuffer cached paths without GL" {
+    const allocator = std.testing.allocator;
+    const rb = try Renderbuffer.create(allocator);
+    defer rb.destroy(allocator);
+    try std.testing.expectEqual(@as(u32, 1), rb.getId());
+    _ = rb.getTarget();
+    _ = rb.getInternalFormat();
+    _ = rb.getWidth();
+    _ = rb.getHeight();
+    _ = rb.getSamples();
+    _ = rb.getSize();
+    try std.testing.expect(!rb.isMultisampled());
+
+    rb.edit().setStorage(.rgba8, 64, 48).apply();
+    try std.testing.expectEqual(@as(i32, 64), rb.getWidth());
+    try std.testing.expectEqual(@as(i32, 48), rb.getHeight());
+    try std.testing.expectEqual(@as(i32, 0), rb.getSamples());
+    try std.testing.expect(!rb.isMultisampled());
+    try std.testing.expect(rb.getInternalFormat().? == .rgba8);
+    const size = rb.getSize();
+    try std.testing.expectEqual(@as(i32, 64), size.w);
+    try std.testing.expectEqual(@as(i32, 48), size.h);
+
+    rb.edit().setStorageMultisample(4, .rgba8, 128, 96).apply();
+    try std.testing.expectEqual(@as(i32, 128), rb.getWidth());
+    try std.testing.expectEqual(@as(i32, 96), rb.getHeight());
+    try std.testing.expectEqual(@as(i32, 4), rb.getSamples());
+    try std.testing.expect(rb.isMultisampled());
+
+    // Plain storage after multisampled resets the sample count.
+    rb.edit().setStorage(.depth24_stencil8, 32, 24).apply();
+    try std.testing.expectEqual(@as(i32, 0), rb.getSamples());
+    try std.testing.expect(!rb.isMultisampled());
+    try std.testing.expect(rb.getInternalFormat().? == .depth24_stencil8);
+
+    // Headless: maxSamples reports 0 without loaded GL.
+    _ = Renderbuffer.maxSamples();
+    // Live-GL entry points: analyze only, never execute headless.
+    _ = &Renderbuffer.bind;
+    _ = &Renderbuffer.bindTo;
+    _ = &Renderbuffer.use;
+    _ = &Renderbuffer.queryParameter;
+    _ = &Renderbuffer.queryWidth;
+    _ = &Renderbuffer.queryHeight;
+    _ = &Renderbuffer.querySamples;
+    _ = &Renderbuffer.queryInternalFormat;
+    _ = &Renderbuffer.queryRedSize;
+    _ = &Renderbuffer.queryGreenSize;
+    _ = &Renderbuffer.queryBlueSize;
+    _ = &Renderbuffer.queryAlphaSize;
+    _ = &Renderbuffer.queryDepthSize;
+    _ = &Renderbuffer.queryStencilSize;
+    _ = &Renderbuffer.isValid;
 }

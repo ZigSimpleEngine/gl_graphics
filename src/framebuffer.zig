@@ -3,13 +3,25 @@ const std = @import("std");
 /// OpenGL bindings import.
 const gl = @import("gl");
 
+/// Local aliases for GL types used by this wrapper, so signatures and bodies
+/// stay short without fully qualified `gl.*` type paths.
+const FramebufferTarget = gl.framebuffers.FramebufferTarget;
+const Attachment = gl.framebuffers.Attachment;
+const DrawBuffer = gl.framebuffers.DrawBuffer;
+const FramebufferStatus = gl.framebuffers.FramebufferStatus;
+const AttachmentParameter = gl.framebuffers.AttachmentParameter;
+const BlitFilter = gl.framebuffers.BlitFilter;
+const TextureTarget = gl.textures.TextureTarget;
+const BufferMask = gl.enums.BufferMask;
+const ReadBuffer = gl.pixels.ReadBuffer;
+
 /// Internal implementation storage for an opaque Framebuffer handle.
 /// Holds OpenGL object state and cached attachments.
 const Impl = struct {
     /// OpenGL framebuffer object identifier.
     id: u32 = 0,
     /// Target binding point for this framebuffer.
-    target: gl.framebuffers.FramebufferTarget = .framebuffer,
+    target: FramebufferTarget = .framebuffer,
     /// Width of the framebuffer in pixels.
     width: i32 = 0,
     /// Height of the framebuffer in pixels.
@@ -23,7 +35,7 @@ const Impl = struct {
     /// Cached combined depth-stencil attachment identifier if present.
     depth_stencil_attachment: ?u32 = null,
     /// Cached draw buffer configuration for multiple render targets.
-    draw_buffers: [16]gl.framebuffers.DrawBuffer = [_]gl.framebuffers.DrawBuffer{.none} ** 16,
+    draw_buffers: [16]DrawBuffer = [_]DrawBuffer{.none} ** 16,
     /// Number of active draw buffers in use.
     draw_count: usize = 1,
 };
@@ -98,7 +110,7 @@ pub const Framebuffer = opaque {
     /// - self: framebuffer to query.
     ///
     /// Returns: framebuffer target enum.
-    pub fn getTarget(self: *const Framebuffer) gl.framebuffers.FramebufferTarget {
+    pub fn getTarget(self: *const Framebuffer) FramebufferTarget {
         return self.implConst().target;
     }
     /// Returns the cached width.
@@ -156,7 +168,7 @@ pub const Framebuffer = opaque {
     /// - self: framebuffer to query.
     ///
     /// Returns: slice of draw buffers currently configured.
-    pub fn getDrawBuffers(self: *const Framebuffer) []const gl.framebuffers.DrawBuffer {
+    pub fn getDrawBuffers(self: *const Framebuffer) []const DrawBuffer {
         const m = self.implConst();
         return m.draw_buffers[0..m.draw_count];
     }
@@ -165,7 +177,7 @@ pub const Framebuffer = opaque {
     /// - self: framebuffer to query.
     ///
     /// Returns: framebuffer status enum.
-    pub fn getStatus(self: *const Framebuffer) gl.framebuffers.FramebufferStatus {
+    pub fn getStatus(self: *const Framebuffer) FramebufferStatus {
         self.bind();
         return gl.framebuffers.checkStatus(self.implConst().target);
     }
@@ -184,7 +196,7 @@ pub const Framebuffer = opaque {
     /// - pname: parameter name to query.
     ///
     /// Returns: integer value of the parameter.
-    pub fn getAttachmentParameter(self: *const Framebuffer, attachment: gl.framebuffers.Attachment, pname: gl.framebuffers.AttachmentParameter) i32 {
+    pub fn getAttachmentParameter(self: *const Framebuffer, attachment: Attachment, pname: AttachmentParameter) i32 {
         self.bind();
         var v: i32 = 0;
         gl.framebuffers.getAttachmentParameter(self.implConst().target, attachment, pname, @ptrCast(&v));
@@ -205,7 +217,7 @@ pub const Framebuffer = opaque {
     /// - target: framebuffer target to bind to.
     ///
     /// Returns: void.
-    pub fn bindTo(self: *const Framebuffer, target: gl.framebuffers.FramebufferTarget) void {
+    pub fn bindTo(self: *const Framebuffer, target: FramebufferTarget) void {
         gl.framebuffers.bind(target, self.implConst().id);
     }
     /// Binds this framebuffer for use as current framebuffer.
@@ -221,7 +233,7 @@ pub const Framebuffer = opaque {
     /// - target: target to bind default framebuffer to.
     ///
     /// Returns: void.
-    pub fn bindDefault(target: gl.framebuffers.FramebufferTarget) void {
+    pub fn bindDefault(target: FramebufferTarget) void {
         gl.framebuffers.bind(target, 0);
     }
     /// Binds the default framebuffer to the generic framebuffer target.
@@ -230,6 +242,109 @@ pub const Framebuffer = opaque {
     /// Returns: void.
     pub fn useDefault() void {
         bindDefault(.framebuffer);
+    }
+    /// Copies a pixel rectangle from another framebuffer into this one.
+    /// Binds `src` to `GL_READ_FRAMEBUFFER` and `self` to
+    /// `GL_DRAW_FRAMEBUFFER`, then performs `glBlitFramebuffer`. When the
+    /// sample counts differ a multisample resolve is performed instead of a
+    /// copy. Depth/stencil resolve requires `filter` to be `.nearest`.
+    /// Parameters:
+    /// - self: destination framebuffer (draw target).
+    /// - src: source framebuffer (read target).
+    /// - src_x0: source rectangle lower-left x.
+    /// - src_y0: source rectangle lower-left y.
+    /// - src_x1: source rectangle upper-right x.
+    /// - src_y1: source rectangle upper-right y.
+    /// - dst_x0: destination rectangle lower-left x.
+    /// - dst_y0: destination rectangle lower-left y.
+    /// - dst_x1: destination rectangle upper-right x.
+    /// - dst_y1: destination rectangle upper-right y.
+    /// - mask: buffers to copy (color/depth/stencil).
+    /// - filter: resampling filter used when sizes differ.
+    ///
+    /// Returns: void.
+    pub fn blitFrom(
+        self: *const Framebuffer,
+        src: *const Framebuffer,
+        src_x0: i32,
+        src_y0: i32,
+        src_x1: i32,
+        src_y1: i32,
+        dst_x0: i32,
+        dst_y0: i32,
+        dst_x1: i32,
+        dst_y1: i32,
+        mask: BufferMask,
+        filter: BlitFilter,
+    ) void {
+        src.bindTo(.read_framebuffer);
+        self.bindTo(.draw_framebuffer);
+        gl.framebuffers.blit(src_x0, src_y0, src_x1, src_y1, dst_x0, dst_y0, dst_x1, dst_y1, mask, filter);
+    }
+    /// Resolves the full contents of a multisampled source framebuffer into
+    /// this one (same-size `blitFrom` with a `.nearest` filter, which is the
+    /// only valid filter for depth/stencil resolve).
+    /// Parameters:
+    /// - self: destination (resolve) framebuffer.
+    /// - src: multisampled source framebuffer.
+    /// - width: framebuffer width in pixels.
+    /// - height: framebuffer height in pixels.
+    /// - mask: buffers to resolve (color/depth/stencil).
+    ///
+    /// Returns: void.
+    pub fn resolveFrom(self: *const Framebuffer, src: *const Framebuffer, width: i32, height: i32, mask: BufferMask) void {
+        self.blitFrom(src, 0, 0, width, height, 0, 0, width, height, mask, .nearest);
+    }
+    /// Copies a pixel rectangle from a framebuffer directly to the default
+    /// (onscreen) framebuffer. Binds `src` to `GL_READ_FRAMEBUFFER` and id 0
+    /// to `GL_DRAW_FRAMEBUFFER`, then performs `glBlitFramebuffer`. Like
+    /// `blitFrom`, a multisample resolve is performed instead of a copy when
+    /// the sample counts differ, so an MSAA render target can be presented
+    /// without an intermediate resolve texture.
+    /// Parameters:
+    /// - src: source framebuffer (read target).
+    /// - src_x0: source rectangle lower-left x.
+    /// - src_y0: source rectangle lower-left y.
+    /// - src_x1: source rectangle upper-right x.
+    /// - src_y1: source rectangle upper-right y.
+    /// - dst_x0: destination rectangle lower-left x.
+    /// - dst_y0: destination rectangle lower-left y.
+    /// - dst_x1: destination rectangle upper-right x.
+    /// - dst_y1: destination rectangle upper-right y.
+    /// - mask: buffers to copy (color/depth/stencil).
+    /// - filter: resampling filter used when sizes differ.
+    ///
+    /// Returns: void.
+    pub fn blitToDefault(
+        src: *const Framebuffer,
+        src_x0: i32,
+        src_y0: i32,
+        src_x1: i32,
+        src_y1: i32,
+        dst_x0: i32,
+        dst_y0: i32,
+        dst_x1: i32,
+        dst_y1: i32,
+        mask: BufferMask,
+        filter: BlitFilter,
+    ) void {
+        src.bindTo(.read_framebuffer);
+        bindDefault(.draw_framebuffer);
+        gl.framebuffers.blit(src_x0, src_y0, src_x1, src_y1, dst_x0, dst_y0, dst_x1, dst_y1, mask, filter);
+    }
+    /// Resolves the full contents of a multisampled source framebuffer
+    /// directly to the default (onscreen) framebuffer (same-size
+    /// `blitToDefault` with a `.nearest` filter, which is the only valid
+    /// filter for depth/stencil resolve).
+    /// Parameters:
+    /// - src: multisampled source framebuffer.
+    /// - width: framebuffer width in pixels.
+    /// - height: framebuffer height in pixels.
+    /// - mask: buffers to resolve (color/depth/stencil).
+    ///
+    /// Returns: void.
+    pub fn resolveToDefault(src: *const Framebuffer, width: i32, height: i32, mask: BufferMask) void {
+        blitToDefault(src, 0, 0, width, height, 0, 0, width, height, mask, .nearest);
     }
 
     /// Returns an editor for batched framebuffer mutation.
@@ -241,36 +356,77 @@ pub const Framebuffer = opaque {
         return Editor.init(self);
     }
 
+    /// Attaches a renderbuffer and mirrors the attachment in the cached state.
+    /// Shared by the single and batched renderbuffer paths of `Editor.apply`.
+    fn attachRenderbufferCached(fb: *Impl, target: FramebufferTarget, attachment: Attachment, renderbuffer: u32, loaded: bool) void {
+        if (loaded) gl.framebuffers.attachRenderbuffer(target, attachment, renderbuffer);
+        switch (attachment) {
+            .depth_attachment => fb.depth_attachment = renderbuffer,
+            .stencil_attachment => fb.stencil_attachment = renderbuffer,
+            .depth_stencil_attachment => fb.depth_stencil_attachment = renderbuffer,
+            else => {
+                const idx = @intFromEnum(attachment) - @intFromEnum(Attachment.color_attachment0);
+                if (idx >= 0 and idx < 16) fb.color_attachments[@intCast(idx)] = renderbuffer;
+            },
+        }
+    }
+
     /// Builder for deferred framebuffer state changes.
     pub const Editor = struct {
+        /// One color attachment assignment for `setColorAttachments`.
+        pub const ColorAttachment = struct {
+            /// Color attachment index.
+            index: usize,
+            /// Texture identifier.
+            texture: u32,
+            /// Texture target.
+            textarget: TextureTarget,
+            /// Mipmap level.
+            level: i32,
+        };
+        /// One renderbuffer attachment assignment for `setRenderbuffers`.
+        pub const RenderbufferAttachment = struct {
+            /// Attachment point.
+            attachment: Attachment,
+            /// Renderbuffer identifier.
+            renderbuffer: u32,
+        };
         /// Reference to the framebuffer being edited.
         _fb: *Framebuffer,
         /// Pending target change if any.
-        _pending_target: ?gl.framebuffers.FramebufferTarget = null,
+        _pending_target: ?FramebufferTarget = null,
         /// Pending size change if any.
         _pending_size: ?struct { w: i32, h: i32 } = null,
         /// Pending single color attachment change.
-        _pending_color: ?struct { index: usize, texture: u32, textarget: gl.textures.TextureTarget, level: i32 } = null,
+        _pending_color: ?struct { index: usize, texture: u32, textarget: TextureTarget, level: i32 } = null,
         /// Pending layered color attachment change.
         _pending_color_layer: ?struct { index: usize, texture: u32, level: i32, layer: i32 } = null,
         /// Pending depth attachment change.
-        _pending_depth: ?struct { texture: u32, textarget: gl.textures.TextureTarget, level: i32 } = null,
+        _pending_depth: ?struct { texture: u32, textarget: TextureTarget, level: i32 } = null,
         /// Pending stencil attachment change.
-        _pending_stencil: ?struct { texture: u32, textarget: gl.textures.TextureTarget, level: i32 } = null,
+        _pending_stencil: ?struct { texture: u32, textarget: TextureTarget, level: i32 } = null,
         /// Pending depth-stencil attachment change.
-        _pending_depth_stencil: ?struct { texture: u32, textarget: gl.textures.TextureTarget, level: i32 } = null,
+        _pending_depth_stencil: ?struct { texture: u32, textarget: TextureTarget, level: i32 } = null,
         /// Pending renderbuffer attachment change.
-        _pending_renderbuffer: ?struct { attachment: gl.framebuffers.Attachment, renderbuffer: u32 } = null,
+        _pending_renderbuffer: ?struct { attachment: Attachment, renderbuffer: u32 } = null,
+        /// Pending batch of renderbuffer attachments.
+        _pending_multiple_renderbuffers: ?[]const RenderbufferAttachment = null,
+        /// Pending layered depth attachment change.
+        _pending_depth_layer: ?struct { texture: u32, level: i32, layer: i32 } = null,
+        /// Pending layered stencil attachment change.
+        _pending_stencil_layer: ?struct { texture: u32, level: i32, layer: i32 } = null,
+        /// Pending layered depth-stencil attachment change.
+        _pending_depth_stencil_layer: ?struct { texture: u32, level: i32, layer: i32 } = null,
         /// Pending draw buffers change.
-        _pending_draw_buffers: ?[]const gl.framebuffers.DrawBuffer = null,
+        _pending_draw_buffers: ?[]const DrawBuffer = null,
         /// Pending invalidate attachments list.
         _pending_invalidate: ?[]const u32 = null,
         /// Pending invalidate sub-rectangle operation.
         _pending_invalidate_sub: ?struct { attachments: []const u32, x: i32, y: i32, w: i32, h: i32 } = null,
         /// Pending read buffer selection.
-        _pending_read_buffer: ?u32 = null,
+        _pending_read_buffer: ?ReadBuffer = null,
         /// Pending batch of color attachments.
-        _pending_multiple_colors: ?[]const struct { index: usize, texture: u32, textarget: gl.textures.TextureTarget, level: i32 } = null,
+        _pending_multiple_colors: ?[]const ColorAttachment = null,
 
         /// Creates an editor bound to a framebuffer.
         /// Parameters:
@@ -286,7 +442,7 @@ pub const Framebuffer = opaque {
         /// - target: new framebuffer target.
         ///
         /// Returns: self for chaining.
-        pub fn setTarget(self: *const Editor, target: gl.framebuffers.FramebufferTarget) *const Editor {
+        pub fn setTarget(self: *const Editor, target: FramebufferTarget) *const Editor {
             @constCast(self)._pending_target = target;
             return @constCast(self);
         }
@@ -310,7 +466,7 @@ pub const Framebuffer = opaque {
         /// - level: mipmap level.
         ///
         /// Returns: self for chaining.
-        pub fn setColorAttachment(self: *const Editor, index: usize, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *const Editor {
+        pub fn setColorAttachment(self: *const Editor, index: usize, texture: u32, textarget: TextureTarget, level: i32) *const Editor {
             @constCast(self)._pending_color = .{ .index = index, .texture = texture, .textarget = textarget, .level = level };
             return @constCast(self);
         }
@@ -320,7 +476,7 @@ pub const Framebuffer = opaque {
         /// - attachments: slice of color attachment descriptors.
         ///
         /// Returns: self for chaining.
-        pub fn setColorAttachments(self: *const Editor, attachments: []const struct { index: usize, texture: u32, textarget: gl.textures.TextureTarget, level: i32 }) *const Editor {
+        pub fn setColorAttachments(self: *const Editor, attachments: []const ColorAttachment) *const Editor {
             @constCast(self)._pending_multiple_colors = attachments;
             return @constCast(self);
         }
@@ -345,7 +501,7 @@ pub const Framebuffer = opaque {
         /// - level: mipmap level.
         ///
         /// Returns: self for chaining.
-        pub fn setDepthAttachment(self: *const Editor, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *const Editor {
+        pub fn setDepthAttachment(self: *const Editor, texture: u32, textarget: TextureTarget, level: i32) *const Editor {
             @constCast(self)._pending_depth = .{ .texture = texture, .textarget = textarget, .level = level };
             return @constCast(self);
         }
@@ -357,7 +513,7 @@ pub const Framebuffer = opaque {
         /// - level: mipmap level.
         ///
         /// Returns: self for chaining.
-        pub fn setStencilAttachment(self: *const Editor, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *const Editor {
+        pub fn setStencilAttachment(self: *const Editor, texture: u32, textarget: TextureTarget, level: i32) *const Editor {
             @constCast(self)._pending_stencil = .{ .texture = texture, .textarget = textarget, .level = level };
             return @constCast(self);
         }
@@ -369,7 +525,7 @@ pub const Framebuffer = opaque {
         /// - level: mipmap level.
         ///
         /// Returns: self for chaining.
-        pub fn setDepthStencilAttachment(self: *const Editor, texture: u32, textarget: gl.textures.TextureTarget, level: i32) *const Editor {
+        pub fn setDepthStencilAttachment(self: *const Editor, texture: u32, textarget: TextureTarget, level: i32) *const Editor {
             @constCast(self)._pending_depth_stencil = .{ .texture = texture, .textarget = textarget, .level = level };
             return @constCast(self);
         }
@@ -380,8 +536,54 @@ pub const Framebuffer = opaque {
         /// - renderbuffer: renderbuffer identifier.
         ///
         /// Returns: self for chaining.
-        pub fn setRenderbuffer(self: *const Editor, attachment: gl.framebuffers.Attachment, renderbuffer: u32) *const Editor {
+        pub fn setRenderbuffer(self: *const Editor, attachment: Attachment, renderbuffer: u32) *const Editor {
             @constCast(self)._pending_renderbuffer = .{ .attachment = attachment, .renderbuffer = renderbuffer };
+            return @constCast(self);
+        }
+        /// Queues multiple renderbuffer attachments at once.
+        /// Parameters:
+        /// - self: editor instance.
+        /// - attachments: slice of attachment/renderbuffer pairs.
+        ///
+        /// Returns: self for chaining.
+        pub fn setRenderbuffers(self: *const Editor, attachments: []const RenderbufferAttachment) *const Editor {
+            @constCast(self)._pending_multiple_renderbuffers = attachments;
+            return @constCast(self);
+        }
+        /// Queues a layered depth attachment assignment.
+        /// Parameters:
+        /// - self: editor instance.
+        /// - texture: texture identifier.
+        /// - level: mipmap level.
+        /// - layer: layer index.
+        ///
+        /// Returns: self for chaining.
+        pub fn setDepthAttachmentLayer(self: *const Editor, texture: u32, level: i32, layer: i32) *const Editor {
+            @constCast(self)._pending_depth_layer = .{ .texture = texture, .level = level, .layer = layer };
+            return @constCast(self);
+        }
+        /// Queues a layered stencil attachment assignment.
+        /// Parameters:
+        /// - self: editor instance.
+        /// - texture: texture identifier.
+        /// - level: mipmap level.
+        /// - layer: layer index.
+        ///
+        /// Returns: self for chaining.
+        pub fn setStencilAttachmentLayer(self: *const Editor, texture: u32, level: i32, layer: i32) *const Editor {
+            @constCast(self)._pending_stencil_layer = .{ .texture = texture, .level = level, .layer = layer };
+            return @constCast(self);
+        }
+        /// Queues a layered depth-stencil attachment assignment.
+        /// Parameters:
+        /// - self: editor instance.
+        /// - texture: texture identifier.
+        /// - level: mipmap level.
+        /// - layer: layer index.
+        ///
+        /// Returns: self for chaining.
+        pub fn setDepthStencilAttachmentLayer(self: *const Editor, texture: u32, level: i32, layer: i32) *const Editor {
+            @constCast(self)._pending_depth_stencil_layer = .{ .texture = texture, .level = level, .layer = layer };
             return @constCast(self);
         }
         /// Queues draw buffers configuration.
@@ -390,17 +592,17 @@ pub const Framebuffer = opaque {
         /// - bufs: slice of draw buffer enums.
         ///
         /// Returns: self for chaining.
-        pub fn setDrawBuffers(self: *const Editor, bufs: []const gl.framebuffers.DrawBuffer) *const Editor {
+        pub fn setDrawBuffers(self: *const Editor, bufs: []const DrawBuffer) *const Editor {
             @constCast(self)._pending_draw_buffers = bufs;
             return @constCast(self);
         }
-        /// Queues read buffer selection.
+        /// Queues read buffer selection (applied via `glReadBuffer`).
         /// Parameters:
         /// - self: editor instance.
-        /// - src: read buffer identifier.
+        /// - src: read buffer to select as `readPixels` source.
         ///
         /// Returns: self for chaining.
-        pub fn setReadBuffer(self: *const Editor, src: u32) *const Editor {
+        pub fn setReadBuffer(self: *const Editor, src: ReadBuffer) *const Editor {
             @constCast(self)._pending_read_buffer = src;
             return @constCast(self);
         }
@@ -444,17 +646,17 @@ pub const Framebuffer = opaque {
             }
             if (loaded) gl.framebuffers.bind(target, fb.id);
             if (@constCast(self)._pending_multiple_colors) |arr| for (arr) |a| {
-                const attachment: gl.framebuffers.Attachment = @enumFromInt(@intFromEnum(gl.framebuffers.Attachment.color_attachment0) + a.index);
+                const attachment: Attachment = @enumFromInt(@intFromEnum(Attachment.color_attachment0) + a.index);
                 if (loaded) gl.framebuffers.attachTexture2d(target, attachment, a.textarget, a.texture, a.level);
                 if (a.index < 16) fb.color_attachments[a.index] = a.texture;
             };
             if (@constCast(self)._pending_color) |c| {
-                const attachment: gl.framebuffers.Attachment = @enumFromInt(@intFromEnum(gl.framebuffers.Attachment.color_attachment0) + c.index);
+                const attachment: Attachment = @enumFromInt(@intFromEnum(Attachment.color_attachment0) + c.index);
                 if (loaded) gl.framebuffers.attachTexture2d(target, attachment, c.textarget, c.texture, c.level);
                 if (c.index < 16) fb.color_attachments[c.index] = c.texture;
             }
             if (@constCast(self)._pending_color_layer) |c| {
-                const attachment: gl.framebuffers.Attachment = @enumFromInt(@intFromEnum(gl.framebuffers.Attachment.color_attachment0) + c.index);
+                const attachment: Attachment = @enumFromInt(@intFromEnum(Attachment.color_attachment0) + c.index);
                 if (loaded) gl.framebuffers.attachTextureLayer(target, attachment, c.texture, c.level, c.layer);
                 if (c.index < 16) fb.color_attachments[c.index] = c.texture;
             }
@@ -470,17 +672,23 @@ pub const Framebuffer = opaque {
                 if (loaded) gl.framebuffers.attachTexture2d(target, .depth_stencil_attachment, ds.textarget, ds.texture, ds.level);
                 fb.depth_stencil_attachment = ds.texture;
             }
+            if (@constCast(self)._pending_depth_layer) |d| {
+                if (loaded) gl.framebuffers.attachTextureLayer(target, .depth_attachment, d.texture, d.level, d.layer);
+                fb.depth_attachment = d.texture;
+            }
+            if (@constCast(self)._pending_stencil_layer) |s| {
+                if (loaded) gl.framebuffers.attachTextureLayer(target, .stencil_attachment, s.texture, s.level, s.layer);
+                fb.stencil_attachment = s.texture;
+            }
+            if (@constCast(self)._pending_depth_stencil_layer) |ds| {
+                if (loaded) gl.framebuffers.attachTextureLayer(target, .depth_stencil_attachment, ds.texture, ds.level, ds.layer);
+                fb.depth_stencil_attachment = ds.texture;
+            }
+            if (@constCast(self)._pending_multiple_renderbuffers) |arr| for (arr) |r| {
+                attachRenderbufferCached(fb, target, r.attachment, r.renderbuffer, loaded);
+            };
             if (@constCast(self)._pending_renderbuffer) |r| {
-                if (loaded) gl.framebuffers.attachRenderbuffer(target, r.attachment, r.renderbuffer);
-                switch (r.attachment) {
-                    .depth_attachment => fb.depth_attachment = r.renderbuffer,
-                    .stencil_attachment => fb.stencil_attachment = r.renderbuffer,
-                    .depth_stencil_attachment => fb.depth_stencil_attachment = r.renderbuffer,
-                    else => {
-                        const idx = @intFromEnum(r.attachment) - @intFromEnum(gl.framebuffers.Attachment.color_attachment0);
-                        if (idx >= 0 and idx < 16) fb.color_attachments[@intCast(idx)] = r.renderbuffer;
-                    },
-                }
+                attachRenderbufferCached(fb, target, r.attachment, r.renderbuffer, loaded);
             }
             if (@constCast(self)._pending_draw_buffers) |bufs| {
                 if (loaded) gl.framebuffers.drawBuffers(bufs);
@@ -490,7 +698,7 @@ pub const Framebuffer = opaque {
             }
             if (@constCast(self)._pending_invalidate) |atts| if (loaded) gl.framebuffers.invalidate(target, atts);
             if (@constCast(self)._pending_invalidate_sub) |s| if (loaded) gl.framebuffers.invalidateSub(target, s.attachments, s.x, s.y, s.w, s.h);
-            _ = @constCast(self)._pending_read_buffer;
+            if (@constCast(self)._pending_read_buffer) |src| if (loaded) gl.pixels.readBuffer(src);
             @constCast(self).* = Editor.init(@constCast(self)._fb);
         }
     };

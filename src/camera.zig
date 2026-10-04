@@ -2,136 +2,253 @@ const std = @import("std");
 const gl = @import("gl");
 const math = @import("math");
 
-/// Function `Camera`.
+/// Plain camera struct parameterized by scalar type.
 ///
-/// Parameters:
-/// - `scalar_type_` — parameter `scalar_type_`.
+/// Value semantics like `Transform`/`Material`: create with a struct
+/// literal (`var cam: Camera(f32) = .{}`), mutate public fields directly.
+/// No allocator, no `create`/`destroy`, no editor.
 ///
-/// Returns: `type`.
+/// The projection matrix is never stored: `getProjection` builds it on
+/// demand from the current parameters, so fields can never go stale.
+/// Only `view` is cached, updated by the single writer `use(world)`.
 pub fn Camera(comptime scalar_type_: type) type {
-    return opaque {
+    return struct {
         const Self = @This();
 
-        /// Constant `Scalar`.
         pub const Scalar = scalar_type_;
-
-        /// Constant `Vec3`.
         pub const Vec3 = math.Vec(3, Scalar);
-
-        /// Constant `Mat4`.
         pub const Mat4 = math.Mat(4, 4, Scalar);
 
-        /// Documentation.
-        const Impl = struct {
-            /// Vertical field of view in radians (perspective).
-            fov_y: Scalar = std.math.degreesToRadians(60.0),
+        /// Vertical field of view in radians (perspective).
+        fov_y: Scalar = std.math.degreesToRadians(60.0),
+        /// Aspect ratio (width / height).
+        aspect: Scalar = 16.0 / 9.0,
+        /// Near clipping plane.
+        near: Scalar = 0.1,
+        /// Far clipping plane.
+        far: Scalar = 1000.0,
+        /// Cached view matrix, updated by `use(world)`.
+        view: Mat4 = Mat4.identity(),
+        /// Viewport X coordinate.
+        viewport_x: i32 = 0,
+        /// Viewport Y coordinate.
+        viewport_y: i32 = 0,
+        /// Viewport width.
+        viewport_w: i32 = 800,
+        /// Viewport height.
+        viewport_h: i32 = 600,
+        /// Perspective projection when true, orthographic otherwise.
+        is_perspective: bool = true,
+        /// Left bound of orthographic projection.
+        ortho_left: Scalar = -1,
+        /// Right bound of orthographic projection.
+        ortho_right: Scalar = 1,
+        /// Bottom bound of orthographic projection.
+        ortho_bottom: Scalar = -1,
+        /// Top bound of orthographic projection.
+        ortho_top: Scalar = 1,
 
-            /// Aspect ratio (width / height).
-            aspect: Scalar = 16.0 / 9.0,
-
-            /// Near clipping plane.
-            near: Scalar = 0.1,
-
-            /// Far clipping plane.
-            far: Scalar = 1000.0,
-
-            /// Cached projection matrix.
-            projection: Mat4 = Mat4.identity(),
-
-            /// Cached view matrix.
-            view: Mat4 = Mat4.identity(),
-
-            /// Viewport X coordinate.
-            viewport_x: i32 = 0,
-
-            /// Viewport Y coordinate.
-            viewport_y: i32 = 0,
-
-            /// Viewport width.
-            viewport_w: i32 = 800,
-
-            /// Viewport height.
-            viewport_h: i32 = 600,
-
-            /// Flag for perspective projection, false is orthographic.
-            is_perspective: bool = true,
-
-            /// Left bound of orthographic projection.
-            ortho_left: Scalar = -1,
-
-            /// Right bound of orthographic projection.
-            ortho_right: Scalar = 1,
-
-            /// Bottom bound of orthographic projection.
-            ortho_bottom: Scalar = -1,
-
-            /// Top bound of orthographic projection.
-            ortho_top: Scalar = 1,
-        };
-
-        /// Function `impl`.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `*Impl`.
-        inline fn impl(self: *Self) *Impl {
-            return @ptrCast(@alignCast(self));
-        }
-
-        /// Function `implConst`.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `*const`.
-        inline fn implConst(self: *const Self) *const Impl {
-            return @ptrCast(@alignCast(self));
-        }
-
-        /// Recalculates the projection matrix.
-        ///
-        /// Parameters:
-        /// - `m` — parameter `m`.
-        fn recalcProjection(m: *Impl) void {
-            if (m.is_perspective) {
-                const fov: f32 = @floatCast(m.fov_y);
-                const aspect: f32 = @floatCast(m.aspect);
-                const near: f32 = @floatCast(m.near);
-                const far: f32 = @floatCast(m.far);
-                const p = math.mat.perspectiveRad(fov, aspect, near, far);
-                m.projection = castMat4Outer(p);
-            } else {
-                const l: f32 = @floatCast(m.ortho_left);
-                const r: f32 = @floatCast(m.ortho_right);
-                const b: f32 = @floatCast(m.ortho_bottom);
-                const t: f32 = @floatCast(m.ortho_top);
-                const n: f32 = @floatCast(m.near);
-                const f: f32 = @floatCast(m.far);
-                const p = math.mat.ortho(l, r, b, t, n, f);
-                m.projection = castMat4Outer(p);
+        /// Builds the projection matrix from current parameters.
+        pub fn getProjection(self: *const Self) Mat4 {
+            if (self.is_perspective) {
+                const p = math.mat.perspectiveRad(
+                    @floatCast(self.fov_y),
+                    @floatCast(self.aspect),
+                    @floatCast(self.near),
+                    @floatCast(self.far),
+                );
+                return castFromF32(p);
             }
+            const p = math.mat.ortho(
+                @floatCast(self.ortho_left),
+                @floatCast(self.ortho_right),
+                @floatCast(self.ortho_bottom),
+                @floatCast(self.ortho_top),
+                @floatCast(self.near),
+                @floatCast(self.far),
+            );
+            return castFromF32(p);
         }
 
-        /// Recalculates the view matrix as inverse of the given global
-        /// camera world matrix.
-        ///
-        /// Parameters:
-        /// - `m` — parameter `m`.
-        /// - `world` — global transform of the camera.
-        fn recalcView(m: *Impl, world: Mat4) void {
-            m.view = world.inverse();
+        /// Returns the combined view-projection matrix.
+        pub fn getViewProjection(self: *const Self) Mat4 {
+            return self.getProjection().mul(self.view);
         }
 
-        /// Casts `f32` matrix to current scalar type.
+        /// Applies the viewport to the GL context.
+        pub fn applyViewport(self: *const Self) void {
+            gl.viewport.viewport(self.viewport_x, self.viewport_y, self.viewport_w, self.viewport_h);
+        }
+
+        /// Updates the view from the global camera world matrix and
+        /// applies the viewport.
+        pub fn use(self: *Self, world: Mat4) void {
+            self.view = world.inverse();
+            self.applyViewport();
+        }
+
+        /// Minimal ortho box size (width == height) covering the
+        /// `shadow_distance`-truncated frustum in ANY orientation.
         ///
-        /// Parameters:
-        /// - `m` — parameter `m`.
-        /// - `4` — parameter `4`.
-        /// - `f32` — parameter `f32`.
+        /// Derivation: with effective far `F = min(far, shadow_distance)`,
+        /// center at depth `(near + F) / 2` and `t = tan(fov_y / 2)`, the
+        /// farthest corner from the center is a far-plane corner at
+        /// `sqrt(((F - near) / 2)^2 + (F·t·aspect)^2 + (F·t)^2)`
+        /// (near corners are strictly closer: same axial term, smaller
+        /// lateral extents). Any light-space projection only shortens this
+        /// distance, so half this value covers every corner in every
+        /// orientation — and some orientation achieves it exactly, hence
+        /// minimal. Returns twice that distance.
         ///
-        /// Returns: `)`.
-        fn castMat4Outer(m: math.Mat(4, 4, f32)) Mat4 {
+        /// Example: fov 60°, aspect 1.5, near 0.1, shadow_distance 10
+        /// gives `F = 10`, `t ≈ 0.577`, `sqrt(4.95^2 + 8.66^2 + 5.77^2) ≈
+        /// 11.53`, i.e. a box of ≈ 23.05 world units.
+        pub fn shadowBoxSize(fov_y: Scalar, aspect: Scalar, near: Scalar, far: Scalar, shadow_distance: Scalar) Scalar {
+            const t = std.math.tan(@as(f32, @floatCast(fov_y)) * 0.5);
+            const f: f32 = @min(@as(f32, @floatCast(far)), @as(f32, @floatCast(shadow_distance)));
+            const n: f32 = @floatCast(near);
+            const half_depth = (f - n) * 0.5;
+            const far_hw = f * t * @as(f32, @floatCast(aspect));
+            const far_hh = f * t;
+            const d_max = @sqrt(half_depth * half_depth + far_hw * far_hw + far_hh * far_hh);
+            return @floatCast(d_max * 2.0);
+        }
+
+        /// Builds an orthographic camera for a directional light covering
+        /// this camera's frustum (truncated to `shadow_distance`, the analog
+        /// of `far` for the shadow map).
+        ///
+        /// `camera_world` is this camera's world matrix, `light_direction`
+        /// points from the surface toward the light (same convention as
+        /// `DirectionalLight.direction`). `resolution` is the square
+        /// shadowmap size in texels (pass 0 to skip snapping).
+        ///
+        /// The ortho box has a FIXED size from `shadowBoxSize`: unlike a
+        /// per-frame tight fit, a fixed size keeps the texel size constant,
+        /// which is what makes the shadow stable — a tight fit changes the
+        /// texel size every frame when the camera rotates, and no snapping
+        /// can fix that swimming.
+        ///
+        /// The box is centered on the (texel-snapped) frustum center, so it
+        /// follows the camera; depth range stays tight per frame (harmless:
+        /// both map and lookup use the same matrix). Returns the light
+        /// camera by value with `view` already set; the caller reads the
+        /// light VP via `getViewProjection()`. The viewport is left at
+        /// defaults: the shadow pass sets the GL viewport itself.
+        pub fn shadowCamera(
+            self: *const Self,
+            camera_world: Mat4,
+            light_direction: Vec3,
+            shadow_distance: Scalar,
+            resolution: u32,
+        ) Self {
+            const FVec3 = math.Vec(3, f32);
+
+            const world = castToF32(camera_world);
+            const eye = FVec3.init(.{ world.data[3].v[0], world.data[3].v[1], world.data[3].v[2] });
+            const fwd = FVec3.init(.{ world.data[2].v[0], world.data[2].v[1], world.data[2].v[2] }).neg().normalize();
+            const right = FVec3.init(.{ world.data[0].v[0], world.data[0].v[1], world.data[0].v[2] }).normalize();
+            const up = FVec3.init(.{ world.data[1].v[0], world.data[1].v[1], world.data[1].v[2] }).normalize();
+
+            const fov: f32 = @floatCast(self.fov_y);
+            const aspect: f32 = @floatCast(self.aspect);
+            const near: f32 = @floatCast(self.near);
+            const far: f32 = @min(@as(f32, @floatCast(self.far)), @as(f32, @floatCast(shadow_distance)));
+            const tan_h = std.math.tan(fov * 0.5);
+
+            const nw = near * tan_h * aspect;
+            const nh = near * tan_h;
+            const fw = far * tan_h * aspect;
+            const fh = far * tan_h;
+            const nc = eye.add(fwd.mul(near));
+            const fc = eye.add(fwd.mul(far));
+            const corners = [_]FVec3{
+                nc.add(up.mul(nh)).sub(right.mul(nw)),
+                nc.add(up.mul(nh)).add(right.mul(nw)),
+                nc.sub(up.mul(nh)).sub(right.mul(nw)),
+                nc.sub(up.mul(nh)).add(right.mul(nw)),
+                fc.add(up.mul(fh)).sub(right.mul(fw)),
+                fc.add(up.mul(fh)).add(right.mul(fw)),
+                fc.sub(up.mul(fh)).sub(right.mul(fw)),
+                fc.sub(up.mul(fh)).add(right.mul(fw)),
+            };
+            const mid = eye.add(fwd.mul((near + far) * 0.5));
+
+            const d = FVec3.init(.{
+                @as(f32, @floatCast(light_direction.v[0])),
+                @as(f32, @floatCast(light_direction.v[1])),
+                @as(f32, @floatCast(light_direction.v[2])),
+            }).normalize();
+            const world_up = if (@abs(d.v[1]) > 0.99)
+                FVec3.init(.{ 1, 0, 0 })
+            else
+                FVec3.init(.{ 0, 1, 0 });
+            const view_dir = d.neg();
+            const side = view_dir.cross(world_up).normalize();
+            const light_up = side.cross(view_dir);
+
+            const depth_margin: f32 = 5.0;
+            // Minimal box covering the frustum in any orientation (fixed =>
+            // constant texel size => stable shadow, see `shadowBoxSize`).
+            const box_f: f32 = @floatCast(shadowBoxSize(self.fov_y, self.aspect, self.near, self.far, shadow_distance));
+
+            // Fixed box: constant texel size (box/resolution) plus a center
+            // snapped to the texel grid. The light axes never rotate, so the
+            // world->texel mapping below only ever shifts by whole texels
+            // (content-aligned, invisible) no matter how the source camera
+            // moves or rotates.
+            var mid_s = mid;
+            if (resolution != 0 and box_f > 0) {
+                const tw: f32 = box_f / @as(f32, @floatFromInt(resolution));
+                const mx = mid.dot(side);
+                const my = mid.dot(light_up);
+                mid_s = mid
+                    .add(side.mul(@round(mx / tw) * tw - mx))
+                    .add(light_up.mul(@round(my / tw) * tw - my));
+            }
+
+            // Eye on the light axis through the (snapped) center: the view
+            // direction stays exactly `-d`, depth placement is continuous
+            // (harmless — map and lookup share the matrix).
+            var t_max: f32 = -std.math.inf(f32);
+            for (corners) |c| {
+                t_max = @max(t_max, c.sub(mid).dot(d));
+            }
+            const light_eye = mid_s.add(d.mul(t_max + depth_margin));
+            const light_view = math.mat.lookAt(light_eye, mid_s, light_up);
+
+            // Tight depth range only (x/y come from the fixed box).
+            var min_dist: f32 = std.math.inf(f32);
+            var max_dist: f32 = -std.math.inf(f32);
+            for (corners) |c| {
+                const p = light_view.mulVec(FVec4.init(.{ c.v[0], c.v[1], c.v[2], 1 }));
+                const dist = -p.v[2];
+                min_dist = @min(min_dist, dist);
+                max_dist = @max(max_dist, dist);
+            }
+
+            // Bounds on the texel grid: center is snapped and (for even
+            // resolutions) half extents are whole texels, so every bound
+            // lands exactly on the grid.
+            const cx = mid_s.dot(side);
+            const cy = mid_s.dot(light_up);
+            const half = box_f * 0.5;
+
+            return .{
+                .is_perspective = false,
+                .view = castFromF32(light_view),
+                .ortho_left = cx - half,
+                .ortho_right = cx + half,
+                .ortho_bottom = cy - half,
+                .ortho_top = cy + half,
+                .near = @max(min_dist - depth_margin, 0.01),
+                .far = max_dist + depth_margin,
+            };
+        }
+
+        const FVec4 = math.Vec(4, f32);
+
+        fn castFromF32(m: math.Mat(4, 4, f32)) Mat4 {
             if (Scalar == f32) return @bitCast(m);
             var res = Mat4.identity();
             inline for (0..4) |c| {
@@ -142,391 +259,15 @@ pub fn Camera(comptime scalar_type_: type) type {
             return res;
         }
 
-        /// Creates a new instance.
-        ///
-        /// Parameters:
-        /// - `allocator` — parameter `allocator`.
-        ///
-        /// Returns: `void)`.
-        pub fn create(allocator: std.mem.Allocator) !*Self {
-            const m = try allocator.create(Impl);
-            m.* = .{};
-            recalcProjection(m);
-            // view stays identity until use(world) provides a global transform
-            return @ptrCast(m);
-        }
-
-        /// Creates an instance with default settings.
-        ///
-        /// Parameters:
-        /// - `allocator` — parameter `allocator`.
-        ///
-        /// Returns: `void)`.
-        pub fn default(allocator: std.mem.Allocator) !*Self {
-            return create(allocator);
-        }
-
-        /// Destroys the instance, freeing `Impl`.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        /// - `allocator` — parameter `allocator`.
-        pub fn destroy(self: *Self, allocator: std.mem.Allocator) void {
-            allocator.destroy(self.impl());
-        }
-
-        /// Returns the vertical field of view in radians.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `Scalar`.
-        pub fn getFovYRad(self: *const Self) Scalar {
-            return self.implConst().fov_y;
-        }
-
-        /// Returns the vertical field of view in degrees.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `Scalar`.
-        pub fn getFovYDeg(self: *const Self) Scalar {
-            return math.scalar.degrees(self.implConst().fov_y);
-        }
-
-        /// Returns the aspect ratio.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `Scalar`.
-        pub fn getAspect(self: *const Self) Scalar {
-            return self.implConst().aspect;
-        }
-
-        /// Returns the near plane.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `Scalar`.
-        pub fn getNear(self: *const Self) Scalar {
-            return self.implConst().near;
-        }
-
-        /// Returns the far plane.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `Scalar`.
-        pub fn getFar(self: *const Self) Scalar {
-            return self.implConst().far;
-        }
-
-        /// Returns the projection matrix.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `Mat4`.
-        pub fn getProjection(self: *const Self) Mat4 {
-            return self.implConst().projection;
-        }
-
-        /// Returns the view matrix.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `Mat4`.
-        pub fn getView(self: *const Self) Mat4 {
-            return self.implConst().view;
-        }
-
-        /// Returns the combined view-projection matrix.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `Mat4`.
-        pub fn getViewProjection(self: *const Self) Mat4 {
-            const m = self.implConst();
-            return m.projection.mul(m.view);
-        }
-
-        /// Returns the viewport parameters.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `struct`.
-        pub fn getViewport(self: *const Self) struct { x: i32, y: i32, w: i32, h: i32 } {
-            const m = self.implConst();
-            return .{ .x = m.viewport_x, .y = m.viewport_y, .w = m.viewport_w, .h = m.viewport_h };
-        }
-
-        /// Checks if camera is in perspective mode.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `bool`.
-        pub fn isPerspective(self: *const Self) bool {
-            return self.implConst().is_perspective;
-        }
-
-        /// Checks if camera is in orthographic mode.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `bool`.
-        pub fn isOrtho(self: *const Self) bool {
-            return !self.implConst().is_perspective;
-        }
-
-        /// Applies the viewport to the GL context.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        pub fn applyViewport(self: *const Self) void {
-            const m = self.implConst();
-            gl.viewport.viewport(m.viewport_x, m.viewport_y, m.viewport_w, m.viewport_h);
-        }
-
-        /// Activates the instance, updating view from the global camera transform.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        /// - `transform` — global camera world matrix to compute view matrix from.
-        pub fn use(self: *Self, transform: Mat4) void {
-            const m = self.impl();
-            recalcView(m, transform);
-            self.applyViewport();
-        }
-
-        /// Creates an editor for deferred batched changes.
-        ///
-        /// Parameters:
-        /// - `self` — parameter `self`.
-        ///
-        /// Returns: `Editor`.
-        pub fn edit(self: *Self) Editor {
-            return Editor.init(self);
-        }
-
-        /// Constant `Editor`.
-        pub const Editor = struct {
-            /// Associated camera.
-            _camera: *Self,
-
-            /// Pending `fov_y` value.
-            _pending_fov_y: ?Scalar = null,
-
-            /// Pending `aspect` value.
-            _pending_aspect: ?Scalar = null,
-
-            /// Pending `near` value.
-            _pending_near: ?Scalar = null,
-
-            /// Pending `far` value.
-            _pending_far: ?Scalar = null,
-
-            /// Pending viewport parameters.
-            _pending_viewport: ?struct { x: i32, y: i32, w: i32, h: i32 } = null,
-
-            /// Pending perspective flag.
-            _pending_perspective: ?bool = null,
-
-            /// Pending orthographic bounds.
-            _pending_ortho: ?struct { l: Scalar, r: Scalar, b: Scalar, t: Scalar } = null,
-
-            /// Alias for `create` for API uniformity.
-            ///
-            /// Parameters:
-            /// - `camera` — parameter `camera`.
-            ///
-            /// Returns: `Editor`.
-            pub fn init(camera: *Self) Editor {
-                return .{ ._camera = camera };
-            }
-
-            /// Sets the pending `fov_y` in radians.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `v` — parameter `v`.
-            ///
-            /// Returns: `*const`.
-            pub fn setFovYRad(self: *const Editor, v: Scalar) *const Editor {
-                @constCast(self)._pending_fov_y = v;
-                return @constCast(self);
-            }
-
-            /// Sets the pending `fov_y` in degrees.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `v` — parameter `v`.
-            ///
-            /// Returns: `*const`.
-            pub fn setFovYDeg(self: *const Editor, v: Scalar) *const Editor {
-                @constCast(self)._pending_fov_y = math.scalar.radians(v);
-                return @constCast(self);
-            }
-
-            /// Sets the pending `aspect`.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `v` — parameter `v`.
-            ///
-            /// Returns: `*const`.
-            pub fn setAspect(self: *const Editor, v: Scalar) *const Editor {
-                @constCast(self)._pending_aspect = v;
-                return @constCast(self);
-            }
-
-            /// Sets the pending `near`.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `v` — parameter `v`.
-            ///
-            /// Returns: `*const`.
-            pub fn setNear(self: *const Editor, v: Scalar) *const Editor {
-                @constCast(self)._pending_near = v;
-                return @constCast(self);
-            }
-
-            /// Sets the pending `far`.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `v` — parameter `v`.
-            ///
-            /// Returns: `*const`.
-            pub fn setFar(self: *const Editor, v: Scalar) *const Editor {
-                @constCast(self)._pending_far = v;
-                return @constCast(self);
-            }
-
-            /// Sets a perspective projection with `fov_y` in radians.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `fov_y` — parameter `fov_y`.
-            /// - `aspect` — parameter `aspect`.
-            /// - `near` — parameter `near`.
-            /// - `far` — parameter `far`.
-            ///
-            /// Returns: `*const`.
-            pub fn setPerspectiveRad(self: *const Editor, fov_y: Scalar, aspect: Scalar, near: Scalar, far: Scalar) *const Editor {
-                @constCast(self)._pending_perspective = true;
-                @constCast(self)._pending_fov_y = fov_y;
-                @constCast(self)._pending_aspect = aspect;
-                @constCast(self)._pending_near = near;
-                @constCast(self)._pending_far = far;
-                return @constCast(self);
-            }
-
-            /// Sets a perspective projection with `fov_y` in degrees.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `fov_y` — parameter `fov_y`.
-            /// - `aspect` — parameter `aspect`.
-            /// - `near` — parameter `near`.
-            /// - `far` — parameter `far`.
-            ///
-            /// Returns: `*const`.
-            pub fn setPerspectiveDeg(self: *const Editor, fov_y: Scalar, aspect: Scalar, near: Scalar, far: Scalar) *const Editor {
-                return @constCast(self).setPerspectiveRad(math.scalar.radians(fov_y), aspect, near, far);
-            }
-
-            /// Sets an orthographic projection.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `left` — parameter `left`.
-            /// - `right` — parameter `right`.
-            /// - `bottom` — parameter `bottom`.
-            /// - `top` — parameter `top`.
-            /// - `near` — parameter `near`.
-            /// - `far` — parameter `far`.
-            ///
-            /// Returns: `*const`.
-            pub fn setOrtho(self: *const Editor, left: Scalar, right: Scalar, bottom: Scalar, top: Scalar, near: Scalar, far: Scalar) *const Editor {
-                @constCast(self)._pending_perspective = false;
-                @constCast(self)._pending_ortho = .{ .l = left, .r = right, .b = bottom, .t = top };
-                @constCast(self)._pending_near = near;
-                @constCast(self)._pending_far = far;
-                return @constCast(self);
-            }
-
-            /// Sets the pending viewport.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            /// - `x` — parameter `x`.
-            /// - `y` — parameter `y`.
-            /// - `w` — parameter `w`.
-            /// - `h` — parameter `h`.
-            ///
-            /// Returns: `*const`.
-            pub fn setViewport(self: *const Editor, x: i32, y: i32, w: i32, h: i32) *const Editor {
-                @constCast(self)._pending_viewport = .{ .x = x, .y = y, .w = w, .h = h };
-                return @constCast(self);
-            }
-
-            /// Applies all pending changes.
-            ///
-            /// Parameters:
-            /// - `self` — parameter `self`.
-            pub fn apply(self: *const Editor) void {
-                const cam = @constCast(self)._camera.impl();
-                if (@constCast(self)._pending_fov_y) |v| cam.fov_y = v;
-                if (@constCast(self)._pending_aspect) |v| cam.aspect = v;
-                if (@constCast(self)._pending_near) |v| cam.near = v;
-                if (@constCast(self)._pending_far) |v| cam.far = v;
-                if (@constCast(self)._pending_perspective) |is_p| cam.is_perspective = is_p;
-                if (@constCast(self)._pending_ortho) |o| {
-                    cam.ortho_left = o.l;
-                    cam.ortho_right = o.r;
-                    cam.ortho_bottom = o.b;
-                    cam.ortho_top = o.t;
+        fn castToF32(m: Mat4) math.Mat(4, 4, f32) {
+            if (Scalar == f32) return @bitCast(m);
+            var res = math.Mat(4, 4, f32).identity();
+            inline for (0..4) |c| {
+                inline for (0..4) |r| {
+                    res.data[c].v[r] = @floatCast(m.data[c].v[r]);
                 }
-                if (@constCast(self)._pending_viewport) |vp| {
-                    cam.viewport_x = vp.x;
-                    cam.viewport_y = vp.y;
-                    cam.viewport_w = vp.w;
-                    cam.viewport_h = vp.h;
-                    @constCast(self)._camera.applyViewport();
-                }
-                recalcProjection(cam);
-                @constCast(self).* = Editor.init(@constCast(self)._camera);
             }
-
-            /// Casts `f32` matrix to scalar type.
-            ///
-            /// Parameters:
-            /// - `m` — parameter `m`.
-            /// - `4` — parameter `4`.
-            /// - `f32` — parameter `f32`.
-            ///
-            /// Returns: `)`.
-            fn castMat4(m: math.Mat(4, 4, f32)) Mat4 {
-                if (Scalar == f32) return @bitCast(m);
-                var res = Mat4.identity();
-                inline for (0..4) |c| {
-                    inline for (0..4) |r| {
-                        res.data[c].v[r] = @floatCast(m.data[c].v[r]);
-                    }
-                }
-                return res;
-            }
-        };
+            return res;
+        }
     };
 }

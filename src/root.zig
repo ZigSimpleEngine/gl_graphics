@@ -345,30 +345,132 @@ test "framebuffer and camera cached paths without GL" {
     _ = &Framebuffer.isValid;
 
     const C = Camera(f32);
-    const cam = try C.create(allocator);
-    defer cam.destroy(allocator);
-    _ = cam.getFovYRad();
-    _ = cam.getFovYDeg();
-    _ = cam.getAspect();
-    _ = cam.getNear();
-    _ = cam.getFar();
+    var cam: C = .{};
+    try std.testing.expectEqual(@as(f32, std.math.degreesToRadians(60.0)), cam.fov_y);
+    try std.testing.expect(cam.is_perspective);
     _ = cam.getProjection();
-    _ = cam.getView();
     _ = cam.getViewProjection();
-    _ = cam.getViewport();
-    _ = cam.isPerspective();
-    _ = cam.isOrtho();
-    cam.edit().setFovYRad(1.0).setAspect(1.5).setNear(0.1).setFar(100.0).apply();
-    try std.testing.expectEqual(@as(f32, 1.0), cam.getFovYRad());
-    cam.edit().setFovYDeg(60.0).apply();
-    try std.testing.expectApproxEqAbs(@as(f32, 60.0), cam.getFovYDeg(), 1e-5);
-    cam.edit().setPerspectiveRad(0.9, 1.4, 0.2, 200.0).apply();
-    cam.edit().setPerspectiveDeg(60.0, 1.4, 0.2, 200.0).apply();
-    try std.testing.expectApproxEqAbs(@as(f32, 60.0), cam.getFovYDeg(), 1e-5);
-    cam.edit().setOrtho(-1, 1, -1, 1, 0.1, 100.0).apply();
+    cam.fov_y = 1.0;
+    cam.aspect = 1.5;
+    cam.near = 0.1;
+    cam.far = 100.0;
+    try std.testing.expectEqual(@as(f32, 1.0), cam.fov_y);
+    cam.is_perspective = false;
+    cam.ortho_left = -1;
+    cam.ortho_right = 1;
+    cam.ortho_bottom = -1;
+    cam.ortho_top = 1;
+    _ = cam.getProjection();
+    // shadowCamera returns an ortho light camera by value.
+    const world = math.Mat(4, 4, f32).identity();
+    const light_cam = cam.shadowCamera(world, math.Vec(3, f32).init(.{ 0, -1, 0 }), 30.0, 1024);
+    try std.testing.expect(!light_cam.is_perspective);
+    _ = light_cam.getViewProjection();
     // GL-touching: analyze only.
     _ = &C.use;
     _ = &C.applyViewport;
+}
+
+test "shadow camera texel stability under camera motion" {
+    const C = Camera(f32);
+    const T = Transform(f32);
+    const V3 = math.Vec(3, f32);
+    const res = 1024;
+    const res_f: f32 = res;
+    const light_dir = V3.init(.{ 0.5, -1.0, 0.3 }).normalize();
+    const target = V3.init(.{ 0, 0, -5 });
+    const up = V3.init(.{ 0, 1, 0 });
+
+    // Static world points around the look target (must stay covered).
+    const points = [_]V3{
+        V3.init(.{ 0, 0, -5 }),
+        V3.init(.{ 3, 0, -5 }),
+        V3.init(.{ -3, 0, -5 }),
+        V3.init(.{ 0, 2, -8 }),
+        V3.init(.{ 2, 1, -2 }),
+        V3.init(.{ -2, 0.5, -7 }),
+    };
+
+    // Camera poses: base, translations, and pure rotations (retargets).
+    const Pose = struct { pos: V3, tgt: V3 };
+    const base_pos = V3.init(.{ 0, 8, 10 });
+    const poses = [_]Pose{
+        .{ .pos = base_pos, .tgt = target },
+        .{ .pos = base_pos.add(V3.init(.{ 1.7, 0, 0 })), .tgt = target.add(V3.init(.{ 1.7, 0, 0 })) },
+        .{ .pos = base_pos.add(V3.init(.{ 0, 0, -2.3 })), .tgt = target.add(V3.init(.{ 0, 0, -2.3 })) },
+        .{ .pos = base_pos.add(V3.init(.{ -0.9, 0.4, 1.1 })), .tgt = target.add(V3.init(.{ -0.9, 0.4, 1.1 })) },
+        .{ .pos = base_pos, .tgt = target.add(V3.init(.{ 4, 0, 0 })) },
+        .{ .pos = base_pos, .tgt = target.add(V3.init(.{ -3, 2, 1 })) },
+        .{ .pos = base_pos, .tgt = target.add(V3.init(.{ 1, -1.5, -2 })) },
+        .{ .pos = base_pos.add(V3.init(.{ 2.2, -1, 0.7 })), .tgt = target.add(V3.init(.{ -2, 1, 2 })) },
+    };
+
+    var cam: C = .{};
+    cam.aspect = 1.5;
+
+    var ref_fx: [points.len]f32 = undefined;
+    var ref_fy: [points.len]f32 = undefined;
+    var first_vp = math.Mat(4, 4, f32).identity();
+    var vp_changed = false;
+
+    for (poses, 0..) |pose, pi| {
+        var t = T.identity();
+        t.position = pose.pos;
+        t.lookAt(pose.tgt, up);
+        const light = cam.shadowCamera(t.toMatrix(), light_dir, 30.0, res);
+        const vp = light.getViewProjection();
+        if (pi > 0) {
+            var diff: f32 = 0;
+            inline for (0..4) |c| {
+                inline for (0..4) |r| {
+                    diff = @max(diff, @abs(vp.data[c].v[r] - first_vp.data[c].v[r]));
+                }
+            }
+            if (diff > 1e-3) vp_changed = true;
+        } else {
+            first_vp = vp;
+        }
+        for (points, 0..) |p, i| {
+            const clip = vp.mulVec(math.Vec(4, f32).init(.{ p.v[0], p.v[1], p.v[2], 1 }));
+            const ndc_x = clip.v[0] / clip.v[3];
+            const ndc_y = clip.v[1] / clip.v[3];
+            const uvx = ndc_x * 0.5 + 0.5;
+            const uvy = ndc_y * 0.5 + 0.5;
+            // Points must stay inside the shadow box for the test to be meaningful.
+            try std.testing.expect(uvx >= -0.01 and uvx <= 1.01);
+            try std.testing.expect(uvy >= -0.01 and uvy <= 1.01);
+            const fx = uvx * res_f - @floor(uvx * res_f);
+            const fy = uvy * res_f - @floor(uvy * res_f);
+            if (pi == 0) {
+                ref_fx[i] = fx;
+                ref_fy[i] = fy;
+            } else {
+                // Fractional texel coords must match up to whole-texel
+                // (content-aligned) shifts: sub-texel swimming is the bug.
+                inline for (.{ .{ fx, ref_fx[i] }, .{ fy, ref_fy[i] } }) |pair| {
+                    const dd = @abs(pair[0] - pair[1]);
+                    try std.testing.expect(dd < 1e-3 or dd > 1 - 1e-3);
+                }
+            }
+        }
+    }
+    // The test is vacuous unless the light matrices actually moved.
+    try std.testing.expect(vp_changed);
+}
+
+test "shadow box size covers the frustum" {
+    const C = Camera(f32);
+    // fov 60°, aspect 1.5, near 0.1, shadow_distance 10:
+    // F = 10, t = tan(30°) ≈ 0.5774,
+    // 2 * sqrt(4.95^2 + 8.66^2 + 5.77^2) ≈ 23.05.
+    const box = C.shadowBoxSize(std.math.degreesToRadians(60.0), 1.5, 0.1, 1000.0, 10.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 23.05), box, 0.05);
+    // shadow_distance truncates like far: smaller distance, smaller box.
+    const small = C.shadowBoxSize(std.math.degreesToRadians(60.0), 1.5, 0.1, 1000.0, 5.0);
+    try std.testing.expect(small < box);
+    // A nearer far plane also shrinks the box.
+    const near_far = C.shadowBoxSize(std.math.degreesToRadians(60.0), 1.5, 0.1, 8.0, 10.0);
+    try std.testing.expect(near_far < box);
 }
 
 test "renderbuffer cached paths without GL" {

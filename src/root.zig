@@ -164,10 +164,10 @@ test "smoke — texture opaque + editor chain" {
     _ = Map(.my_map, struct { a: i32 });
     _ = ShaderProgram(DummyVert, DummyFrag);
     _ = VertexProgram(DummyVert);
-    const DummyMat = Material(DummyVertUniform, DummyVert.Define, .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uColor = math.Vec(4, f32).zero() }, .{});
+    const DummyMat = Material(DummyVertUniform, DummyVert.Define, .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uColor = math.Vec(4, f32).zero() }, .{}, 0);
     const dummy_mat: DummyMat = .{};
     _ = dummy_mat;
-    const DummyVertMat = VertexMaterial(DummyVertUniform, DummyVert.Define, .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, .{});
+    const DummyVertMat = VertexMaterial(DummyVertUniform, DummyVert.Define, .{ .uMvp = std.mem.zeroes(math.Mat(4, 4, f32)) }, .{}, 0);
     const dummy_vert_mat: DummyVertMat = .{};
     _ = dummy_vert_mat;
     _ = Framebuffer;

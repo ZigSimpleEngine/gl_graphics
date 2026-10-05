@@ -1180,10 +1180,8 @@ pub const AnyMaterial = struct {
         vert_defines_raw_fn: *const fn (*anyopaque) []u8,
         /// Mutable byte view of the cached fragment defines, or null when absent.
         frag_defines_raw_fn: *const fn (*anyopaque) ?[]u8,
-        /// Reads `render_order` from the borrowed instance (see `Material.render_order`).
-        get_render_order_fn: *const fn (*anyopaque) i32,
-        /// Writes `render_order` on the borrowed instance (see `Material.render_order`).
-        set_render_order_fn: *const fn (*anyopaque, i32) void,
+        /// Reads the bound material type's `render_order` const (see `Material.render_order`).
+        get_render_order_fn: *const fn () i32,
     };
 
     /// Borrowed `*Material` instance, owned by the caller.
@@ -1259,13 +1257,8 @@ pub const AnyMaterial = struct {
                 const m: P = @ptrCast(@alignCast(p));
                 return std.mem.asBytes(&m.fragDefines);
             }
-            fn getRenderOrder(p: *anyopaque) i32 {
-                const m: P = @ptrCast(@alignCast(p));
-                if (@hasField(M, "render_order")) return m.render_order else return 0;
-            }
-            fn setRenderOrder(p: *anyopaque, value: i32) void {
-                const m: P = @ptrCast(@alignCast(p));
-                if (@hasField(M, "render_order")) m.render_order = value;
+            fn getRenderOrder() i32 {
+                if (@hasDecl(M, "render_order")) return M.render_order else return 0;
             }
             const vtable: VTable = .{
                 .use_fn = @This().use,
@@ -1274,7 +1267,6 @@ pub const AnyMaterial = struct {
                 .vert_defines_raw_fn = @This().vertDefinesRaw,
                 .frag_defines_raw_fn = @This().fragDefinesRaw,
                 .get_render_order_fn = @This().getRenderOrder,
-                .set_render_order_fn = @This().setRenderOrder,
             };
         };
         return .{
@@ -1333,13 +1325,8 @@ pub const AnyMaterial = struct {
             fn fragDefinesRaw(_: *anyopaque) ?[]u8 {
                 return null;
             }
-            fn getRenderOrder(p: *anyopaque) i32 {
-                const m: P = @ptrCast(@alignCast(p));
-                if (@hasField(M, "render_order")) return m.render_order else return 0;
-            }
-            fn setRenderOrder(p: *anyopaque, value: i32) void {
-                const m: P = @ptrCast(@alignCast(p));
-                if (@hasField(M, "render_order")) m.render_order = value;
+            fn getRenderOrder() i32 {
+                if (@hasDecl(M, "render_order")) return M.render_order else return 0;
             }
             const vtable: VTable = .{
                 .use_fn = @This().use,
@@ -1348,7 +1335,6 @@ pub const AnyMaterial = struct {
                 .vert_defines_raw_fn = @This().vertDefinesRaw,
                 .frag_defines_raw_fn = @This().fragDefinesRaw,
                 .get_render_order_fn = @This().getRenderOrder,
-                .set_render_order_fn = @This().setRenderOrder,
             };
         };
         return .{
@@ -1386,16 +1372,11 @@ pub const AnyMaterial = struct {
     pub fn use(self: *AnyMaterial, allocator: std.mem.Allocator) anyerror!void {
         try self.vtable.use_fn(self.ptr, allocator);
     }
-    /// Reads `render_order` from the borrowed concrete instance (single source
-    /// of truth lives in the instance; the record keeps no copy). Returns 0
-    /// when the bound material type has no `render_order` field.
+    /// Reads the bound material type's `render_order` const (set once at material
+    /// creation; see `Material.render_order`). Returns 0 when the bound material
+    /// type has no `render_order` const.
     pub fn getRenderOrder(self: *const AnyMaterial) i32 {
-        return self.vtable.get_render_order_fn(self.ptr);
-    }
-    /// Writes `render_order` on the borrowed concrete instance. No-op when the
-    /// bound material type has no `render_order` field.
-    pub fn setRenderOrder(self: *AnyMaterial, value: i32) void {
-        self.vtable.set_render_order_fn(self.ptr, value);
+        return self.vtable.get_render_order_fn();
     }
     /// Mutable byte view of the cached vertex uniform of this instance.
     /// `len` is always `@sizeOf(VertUniform)` and the address satisfies the

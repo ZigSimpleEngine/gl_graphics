@@ -138,13 +138,15 @@ fn checkShaderDefine(comptime Define: type, comptime Owner: type, comptime param
 /// - FragDefine: fragment shader `Define` struct type.
 /// - frag_uniform_value: default fragment uniform value.
 /// - frag_define_value: default fragment defines value.
+/// - render_order_value: draw order for this material type, set once at creation.
+///   Stored as `pub const render_order` on the material type (not a mutable field).
 ///
 /// Returns: material struct type with `vertUniform`/`fragUniform`/
 /// `vertDefines`/`fragDefines` defaulted to the passed values.
 ///
 /// Example:
 /// ```zig
-/// const M = Material(MyVert.Uniform, MyVert.Define, .{ .uMvp = mvp }, .{}, MyFrag.Uniform, MyFrag.Define, .{ .uColor = white }, .{});
+/// const M = Material(MyVert.Uniform, MyVert.Define, .{ .uMvp = mvp }, .{}, MyFrag.Uniform, MyFrag.Define, .{ .uColor = white }, .{}, 0);
 /// var m: M = .{};
 /// m.vertUniform.uTex = &tex; // or leave null to unbind
 /// m.vertDefines.MODE = ._1;
@@ -159,6 +161,7 @@ pub fn Material(
     comptime FragDefine: type,
     comptime frag_uniform_value: FragUniform,
     comptime frag_define_value: FragDefine,
+    comptime render_order_value: i32,
 ) type {
     const Vert = checkShaderOwner(VertUniform, "VertUniform");
     checkShaderDefine(VertDefine, Vert, "VertDefine");
@@ -195,9 +198,10 @@ pub fn Material(
         /// Cached fragment defines (defaults from `frag_define_value`).
         fragDefines: FragDefine = frag_define_value,
 
-        /// Render order: used for sorting materials by draw order — the lower the
-        /// value, the earlier all objects containing this material will be drawn.
-        render_order: i32 = 0,
+        /// Render order, set once at material creation: used for sorting materials
+        /// by draw order — the lower the value, the earlier all objects containing
+        /// this material will be drawn.
+        pub const render_order: i32 = render_order_value;
 
         /// Errors for name/id based uniform field access.
         pub const UniformFieldError = gpu_meta.ResourceError;
@@ -339,13 +343,15 @@ pub fn Material(
 /// - VertDefine: vertex shader `Define` struct type (e.g. `MyVert.Define`).
 /// - vert_uniform_value: default vertex uniform value.
 /// - vert_define_value: default vertex defines value.
+/// - render_order_value: draw order for this material type, set once at creation.
+///   Stored as `pub const render_order` on the material type (not a mutable field).
 ///
 /// Returns: material struct type with `vertUniform`/`vertDefines` defaulted
 /// to the passed values.
 ///
 /// Example:
 /// ```zig
-/// const M = VertexMaterial(MyVert.Uniform, MyVert.Define, .{ .uMvp = mvp }, .{});
+/// const M = VertexMaterial(MyVert.Uniform, MyVert.Define, .{ .uMvp = mvp }, .{}, 0);
 /// var m: M = .{};
 /// try m.use(allocator);
 /// ```
@@ -354,6 +360,7 @@ pub fn VertexMaterial(
     comptime VertDefine: type,
     comptime vert_uniform_value: VertUniform,
     comptime vert_define_value: VertDefine,
+    comptime render_order_value: i32,
 ) type {
     const Vert = checkShaderOwner(VertUniform, "VertUniform");
     checkShaderDefine(VertDefine, Vert, "VertDefine");
@@ -378,9 +385,10 @@ pub fn VertexMaterial(
         /// Cached vertex defines (defaults from `vert_define_value`).
         vertDefines: VertDefine = vert_define_value,
 
-        /// Render order: used for sorting materials by draw order — the lower the
-        /// value, the earlier all objects containing this material will be drawn.
-        render_order: i32 = 0,
+        /// Render order, set once at material creation: used for sorting materials
+        /// by draw order — the lower the value, the earlier all objects containing
+        /// this material will be drawn.
+        pub const render_order: i32 = render_order_value;
 
         /// Errors for name/id based uniform field access.
         pub const UniformFieldError = gpu_meta.ResourceError;
@@ -527,7 +535,7 @@ const DummyFrag = struct {
 };
 
 test "material from uniform types, defaults and uniqueness" {
-    const M = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 1.0, .uB = 2 }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{});
+    const M = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 1.0, .uB = 2 }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{}, 0);
     var self: M = .{};
     // Factory values become instance defaults.
     try std.testing.expectEqual(@as(f32, 1.0), self.vertUniform.uA);
@@ -538,7 +546,7 @@ test "material from uniform types, defaults and uniqueness" {
     try std.testing.expectEqual(@as(f32, 5.0), self.vertUniform.uA);
 
     // Same shaders, different data -> unique material, shared program.
-    const M2 = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 9.0, .uB = 2 }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{});
+    const M2 = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 9.0, .uB = 2 }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{}, 0);
     try std.testing.expect(M != M2);
     try std.testing.expect(M.ShaderProgram == M2.ShaderProgram);
     const other: M2 = .{};
@@ -565,7 +573,7 @@ test "material from uniform types, defaults and uniqueness" {
 }
 
 test "vertex material from uniform type and default" {
-    const MV = VertexMaterial(DummyVertUniform, DummyVert.Define, .{ .uA = 0.5, .uB = -1 }, .{});
+    const MV = VertexMaterial(DummyVertUniform, DummyVert.Define, .{ .uA = 0.5, .uB = -1 }, .{}, 0);
     try std.testing.expect(!MV.HasFrag);
     try std.testing.expect(!@hasDecl(MV, "FragUniformT"));
     const vonly: MV = .{};
@@ -582,7 +590,7 @@ test "vertex material from uniform type and default" {
 }
 
 test "material nullable resource defaults and null roundtrip" {
-    const M = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 1.0, .uB = 2 }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{});
+    const M = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 1.0, .uB = 2 }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{}, 0);
     var self: M = .{};
     try std.testing.expect(self.vertUniform.uTex == null);
     const tid = M.getVertUniformFieldId("uTex", ?*const u8) orelse unreachable;
@@ -598,7 +606,7 @@ test "material nullable resource defaults and null roundtrip" {
 }
 
 test "material data bundle with explicit defines values" {
-    const M = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 1.0, .uB = 2 }, .{ .MODE = ._1 }, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{});
+    const M = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 1.0, .uB = 2 }, .{ .MODE = ._1 }, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{}, 0);
     const self: M = .{};
     try std.testing.expectEqual(DummyVertMode._1, self.vertDefines.MODE);
     try std.testing.expect(M.VertUniformT == DummyVertUniform);
@@ -608,7 +616,7 @@ test "material data bundle with explicit defines values" {
 }
 
 test "material defines default and field access" {
-    const M = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 1.0, .uB = 2 }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{});
+    const M = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 1.0, .uB = 2 }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{}, 0);
     var self: M = .{};
     try std.testing.expectEqual(DummyVertMode._0, self.vertDefines.MODE);
     const did = M.getVertDefinesFieldId("MODE", DummyVertMode) orelse unreachable;
@@ -620,7 +628,7 @@ test "material defines default and field access" {
 }
 
 test "asAnyMaterial roundtrips through AnyMaterial without GL" {
-    const M = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 1.0, .uB = 2 }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{});
+    const M = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 1.0, .uB = 2 }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{}, 0);
     var m: M = .{};
     var rec: AnyMaterial = m.asAnyMaterial();
     try std.testing.expect(rec.has_frag);
@@ -634,20 +642,22 @@ test "asAnyMaterial roundtrips through AnyMaterial without GL" {
     try std.testing.expectEqual(@as(f32, 2.0), try rec.getVertUniformData(id_a, f32));
     try std.testing.expectEqual(@as(f32, 2.0), m.vertUniform.uA);
 
-    // render_order goes through the borrowed instance (the record keeps no copy).
+    // render_order is a type-level constant set once at creation.
+    try std.testing.expectEqual(@as(i32, 0), M.render_order);
     try std.testing.expectEqual(@as(i32, 0), rec.getRenderOrder());
-    rec.setRenderOrder(5);
-    try std.testing.expectEqual(@as(i32, 5), m.render_order);
-    m.render_order = -1;
-    try std.testing.expectEqual(@as(i32, -1), rec.getRenderOrder());
 
-    const MV = VertexMaterial(DummyVertUniform, DummyVert.Define, .{ .uA = 0.5, .uB = -1 }, .{});
+    const MO = Material(DummyVertUniform, DummyVert.Define, .{ .uA = 1.0, .uB = 2 }, .{}, DummyFragUniform, DummyFrag.Define, .{ .uC = 3 }, .{}, 7);
+    try std.testing.expectEqual(@as(i32, 7), MO.render_order);
+    var mo: MO = .{};
+    var orec = mo.asAnyMaterial();
+    try std.testing.expectEqual(@as(i32, 7), orec.getRenderOrder());
+
+    const MV = VertexMaterial(DummyVertUniform, DummyVert.Define, .{ .uA = 0.5, .uB = -1 }, .{}, 3);
     var vm: MV = .{};
     var vrec: AnyMaterial = vm.asAnyMaterial();
     try std.testing.expect(!vrec.has_frag);
     try std.testing.expect(vrec.cast(MV) == &vm);
     try std.testing.expect(vrec.cast(M) == null);
-    try std.testing.expectEqual(@as(i32, 0), vrec.getRenderOrder());
-    vrec.setRenderOrder(3);
-    try std.testing.expectEqual(@as(i32, 3), vm.render_order);
+    try std.testing.expectEqual(@as(i32, 3), MV.render_order);
+    try std.testing.expectEqual(@as(i32, 3), vrec.getRenderOrder());
 }

@@ -195,6 +195,10 @@ pub fn Material(
         /// Cached fragment defines (defaults from `frag_define_value`).
         fragDefines: FragDefine = frag_define_value,
 
+        /// Render order: used for sorting materials by draw order — the lower the
+        /// value, the earlier all objects containing this material will be drawn.
+        render_order: i32 = 0,
+
         /// Errors for name/id based uniform field access.
         pub const UniformFieldError = gpu_meta.ResourceError;
 
@@ -373,6 +377,10 @@ pub fn VertexMaterial(
         vertUniform: VertUniform = vert_uniform_value,
         /// Cached vertex defines (defaults from `vert_define_value`).
         vertDefines: VertDefine = vert_define_value,
+
+        /// Render order: used for sorting materials by draw order — the lower the
+        /// value, the earlier all objects containing this material will be drawn.
+        render_order: i32 = 0,
 
         /// Errors for name/id based uniform field access.
         pub const UniformFieldError = gpu_meta.ResourceError;
@@ -626,10 +634,20 @@ test "asAnyMaterial roundtrips through AnyMaterial without GL" {
     try std.testing.expectEqual(@as(f32, 2.0), try rec.getVertUniformData(id_a, f32));
     try std.testing.expectEqual(@as(f32, 2.0), m.vertUniform.uA);
 
+    // render_order goes through the borrowed instance (the record keeps no copy).
+    try std.testing.expectEqual(@as(i32, 0), rec.getRenderOrder());
+    rec.setRenderOrder(5);
+    try std.testing.expectEqual(@as(i32, 5), m.render_order);
+    m.render_order = -1;
+    try std.testing.expectEqual(@as(i32, -1), rec.getRenderOrder());
+
     const MV = VertexMaterial(DummyVertUniform, DummyVert.Define, .{ .uA = 0.5, .uB = -1 }, .{});
     var vm: MV = .{};
     var vrec: AnyMaterial = vm.asAnyMaterial();
     try std.testing.expect(!vrec.has_frag);
     try std.testing.expect(vrec.cast(MV) == &vm);
     try std.testing.expect(vrec.cast(M) == null);
+    try std.testing.expectEqual(@as(i32, 0), vrec.getRenderOrder());
+    vrec.setRenderOrder(3);
+    try std.testing.expectEqual(@as(i32, 3), vm.render_order);
 }

@@ -305,29 +305,29 @@ pub const UniformFields = struct {
 pub fn uniformFields(comptime U: type) UniformFields {
     if (@typeInfo(U) != .@"struct") @compileError("uniformFields expects a struct, got " ++ @typeName(U));
     const S = struct {
-        const struct_fields = @typeInfo(U).@"struct".fields;
+        const sinfo = @typeInfo(U).@"struct";
         const fields_acc: []const UniformFieldDesc = blk: {
             var acc: []const UniformFieldDesc = &.{};
-            for (struct_fields) |f| {
+            for (sinfo.field_names, sinfo.field_types) |fname, FType| {
                 acc = acc ++ [_]UniformFieldDesc{.{
-                    .name = f.name,
-                    .type_id = typeId(f.type),
-                    .size = @sizeOf(f.type),
-                    .offset = @offsetOf(U, f.name),
-                    .kind = uniformKindOf(f.type),
+                    .name = fname,
+                    .type_id = typeId(FType),
+                    .size = @sizeOf(FType),
+                    .offset = @offsetOf(U, fname),
+                    .kind = uniformKindOf(FType),
                 }};
             }
             break :blk acc;
         };
-        const kvs_arr: [struct_fields.len]struct { []const u8, UniformFieldRef } = blk: {
-            var arr: [struct_fields.len]struct { []const u8, UniformFieldRef } = undefined;
-            for (struct_fields, 0..) |f, i| {
-                arr[i] = .{ f.name, .{
+        const kvs_arr: [sinfo.field_names.len]struct { []const u8, UniformFieldRef } = blk: {
+            var arr: [sinfo.field_names.len]struct { []const u8, UniformFieldRef } = undefined;
+            for (sinfo.field_names, sinfo.field_types, 0..) |fname, FType, i| {
+                arr[i] = .{ fname, .{
                     .id = @intCast(i),
-                    .type_id = typeId(f.type),
-                    .size = @sizeOf(f.type),
-                    .offset = @offsetOf(U, f.name),
-                    .kind = uniformKindOf(f.type),
+                    .type_id = typeId(FType),
+                    .size = @sizeOf(FType),
+                    .offset = @offsetOf(U, fname),
+                    .kind = uniformKindOf(FType),
                 } };
             }
             break :blk arr;

@@ -26,9 +26,9 @@ fn linkProgram(vs_id: u32, fs_id: ?u32) u32 {
 /// Caches live uniform locations into a descriptor `IdCache`.
 /// The cache must expose one `i32` field per `Uniform` field name.
 fn fillIdCache(prog_id: u32, comptime Uniform: type, cache_ptr: anytype) void {
-    inline for (@typeInfo(Uniform).@"struct".fields) |field| {
-        const loc = gl.uniforms.location(prog_id, @ptrCast(field.name));
-        @field(cache_ptr.*, field.name) = loc;
+    inline for (@typeInfo(Uniform).@"struct".field_names) |field_name| {
+        const loc = gl.uniforms.location(prog_id, @ptrCast(field_name));
+        @field(cache_ptr.*, field_name) = loc;
     }
 }
 

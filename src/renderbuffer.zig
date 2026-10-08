@@ -224,7 +224,7 @@ pub const Renderbuffer = opaque {
     ///
     /// Returns: internal format as reported by GL.
     pub fn queryInternalFormat(self: *const Renderbuffer) InternalFormat {
-        return @enumFromInt(@as(u32, @intCast(self.queryParameter(.renderbuffer_internal_format))));
+        return @fromBackingInt(@intCast(@as(u32, @intCast(self.queryParameter(.renderbuffer_internal_format)))));
     }
     /// Queries the red component resolution from GL.
     /// Parameters:

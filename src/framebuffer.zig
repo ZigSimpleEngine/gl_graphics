@@ -1,4 +1,4 @@
-﻿/// Standard library import.
+/// Standard library import.
 const std = @import("std");
 /// OpenGL bindings import.
 const gl = @import("gl");
@@ -27,7 +27,7 @@ const Impl = struct {
     /// Height of the framebuffer in pixels.
     height: i32 = 0,
     /// Cached color attachment identifiers indexed by attachment index.
-    color_attachments: [16]?u32 = [_]?u32{null} ** 16,
+    color_attachments: [16]?u32 = @splat(null),
     /// Cached depth attachment identifier if present.
     depth_attachment: ?u32 = null,
     /// Cached stencil attachment identifier if present.
@@ -35,7 +35,7 @@ const Impl = struct {
     /// Cached combined depth-stencil attachment identifier if present.
     depth_stencil_attachment: ?u32 = null,
     /// Cached draw buffer configuration for multiple render targets.
-    draw_buffers: [16]DrawBuffer = [_]DrawBuffer{.none} ** 16,
+    draw_buffers: [16]DrawBuffer = @splat(.none),
     /// Number of active draw buffers in use.
     draw_count: usize = 1,
 };
@@ -365,7 +365,7 @@ pub const Framebuffer = opaque {
             .stencil_attachment => fb.stencil_attachment = renderbuffer,
             .depth_stencil_attachment => fb.depth_stencil_attachment = renderbuffer,
             else => {
-                const idx = @intFromEnum(attachment) - @intFromEnum(Attachment.color_attachment0);
+                const idx = @backingInt(attachment) - @backingInt(Attachment.color_attachment0);
                 if (idx >= 0 and idx < 16) fb.color_attachments[@intCast(idx)] = renderbuffer;
             },
         }
@@ -646,17 +646,17 @@ pub const Framebuffer = opaque {
             }
             if (loaded) gl.framebuffers.bind(target, fb.id);
             if (@constCast(self)._pending_multiple_colors) |arr| for (arr) |a| {
-                const attachment: Attachment = @enumFromInt(@intFromEnum(Attachment.color_attachment0) + a.index);
+                const attachment: Attachment = @fromBackingInt(@intCast(@backingInt(Attachment.color_attachment0) + a.index));
                 if (loaded) gl.framebuffers.attachTexture2d(target, attachment, a.textarget, a.texture, a.level);
                 if (a.index < 16) fb.color_attachments[a.index] = a.texture;
             };
             if (@constCast(self)._pending_color) |c| {
-                const attachment: Attachment = @enumFromInt(@intFromEnum(Attachment.color_attachment0) + c.index);
+                const attachment: Attachment = @fromBackingInt(@intCast(@backingInt(Attachment.color_attachment0) + c.index));
                 if (loaded) gl.framebuffers.attachTexture2d(target, attachment, c.textarget, c.texture, c.level);
                 if (c.index < 16) fb.color_attachments[c.index] = c.texture;
             }
             if (@constCast(self)._pending_color_layer) |c| {
-                const attachment: Attachment = @enumFromInt(@intFromEnum(Attachment.color_attachment0) + c.index);
+                const attachment: Attachment = @fromBackingInt(@intCast(@backingInt(Attachment.color_attachment0) + c.index));
                 if (loaded) gl.framebuffers.attachTextureLayer(target, attachment, c.texture, c.level, c.layer);
                 if (c.index < 16) fb.color_attachments[c.index] = c.texture;
             }

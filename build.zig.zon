@@ -2,7 +2,7 @@
     .name = .gl_graphics,
     .version = "0.0.1",
     .fingerprint = 0xd1b33b3f71ac442a,
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .gl = .{ .path = "../gl" },
         .math = .{ .path = "../math" },

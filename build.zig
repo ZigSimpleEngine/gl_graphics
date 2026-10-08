@@ -13,7 +13,7 @@ pub const Options = struct {
     /// The target architecture for which the module will be built.
     target: ?std.Build.ResolvedTarget = null,
     /// The optimization mode used to compile the module.
-    optimize: ?std.builtin.OptimizeMode = null,
+    optimize: ?std.lang.Optimize = null,
     /// Shared `gl` module instance. See `dependency_math` for the pattern.
     dependency_gl: ?*std.Build.Module = null,
     /// Shared `math` module instance. When `null`, resolved via
@@ -179,9 +179,7 @@ pub fn build(b: *std.Build) void {
 
     run_cmd.step.dependOn(b.getInstallStep());
 
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     const mod_tests = b.addTest(.{
         .root_module = mod,

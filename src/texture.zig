@@ -1,4 +1,4 @@
-﻿/// Standard library import providing allocation and utility functions.
+/// Standard library import providing allocation and utility functions.
 const std = @import("std");
 /// OpenGL bindings import providing texture targets, formats, filters and GL functions.
 const gl = @import("gl");
@@ -1313,31 +1313,31 @@ pub const Texture = opaque {
             if (@constCast(self)._pending_copy_sub2d) |c| if (loaded) gl.textures.copySubImage2d(c.target, c.level, c.xoffset, c.yoffset, c.x, c.y, c.width, c.height);
             if (@constCast(self)._pending_copy_sub3d) |c| if (loaded) gl.textures.copySubImage3d(c.target, c.level, c.xoffset, c.yoffset, c.zoffset, c.x, c.y, c.width, c.height);
             if (@constCast(self)._pending_min_filter) |f| {
-                if (loaded) gl.textures.parameterI(effective_target, .texture_min_filter, @intCast(@intFromEnum(f)));
+                if (loaded) gl.textures.parameterI(effective_target, .texture_min_filter, @intCast(@backingInt(f)));
                 m.min_filter = f;
             }
             if (@constCast(self)._pending_mag_filter) |f| {
-                if (loaded) gl.textures.parameterI(effective_target, .texture_mag_filter, @intCast(@intFromEnum(f)));
+                if (loaded) gl.textures.parameterI(effective_target, .texture_mag_filter, @intCast(@backingInt(f)));
                 m.mag_filter = f;
             }
             if (@constCast(self)._pending_wrap_s) |w| {
-                if (loaded) gl.textures.parameterI(effective_target, .texture_wrap_s, @intCast(@intFromEnum(w)));
+                if (loaded) gl.textures.parameterI(effective_target, .texture_wrap_s, @intCast(@backingInt(w)));
                 m.wrap_s = w;
             }
             if (@constCast(self)._pending_wrap_t) |w| {
-                if (loaded) gl.textures.parameterI(effective_target, .texture_wrap_t, @intCast(@intFromEnum(w)));
+                if (loaded) gl.textures.parameterI(effective_target, .texture_wrap_t, @intCast(@backingInt(w)));
                 m.wrap_t = w;
             }
             if (@constCast(self)._pending_wrap_r) |w| {
-                if (loaded) gl.textures.parameterI(effective_target, .texture_wrap_r, @intCast(@intFromEnum(w)));
+                if (loaded) gl.textures.parameterI(effective_target, .texture_wrap_r, @intCast(@backingInt(w)));
                 m.wrap_r = w;
             }
             if (@constCast(self)._pending_compare_mode) |v| {
-                if (loaded) gl.textures.parameterI(effective_target, .texture_compare_mode, @intCast(@intFromEnum(v)));
+                if (loaded) gl.textures.parameterI(effective_target, .texture_compare_mode, @intCast(@backingInt(v)));
                 m.compare_mode = v;
             }
             if (@constCast(self)._pending_compare_func) |v| {
-                if (loaded) gl.textures.parameterI(effective_target, .texture_compare_func, @intCast(@intFromEnum(v)));
+                if (loaded) gl.textures.parameterI(effective_target, .texture_compare_func, @intCast(@backingInt(v)));
                 m.compare_func = v;
             }
             if (@constCast(self)._pending_base_level) |v| {
@@ -1357,19 +1357,19 @@ pub const Texture = opaque {
                 m.max_lod = v;
             }
             if (@constCast(self)._pending_swizzle_r) |s| {
-                if (loaded) gl.textures.parameterI(effective_target, .texture_swizzle_r, @intCast(@intFromEnum(s)));
+                if (loaded) gl.textures.parameterI(effective_target, .texture_swizzle_r, @intCast(@backingInt(s)));
                 m.swizzle_r = s;
             }
             if (@constCast(self)._pending_swizzle_g) |s| {
-                if (loaded) gl.textures.parameterI(effective_target, .texture_swizzle_g, @intCast(@intFromEnum(s)));
+                if (loaded) gl.textures.parameterI(effective_target, .texture_swizzle_g, @intCast(@backingInt(s)));
                 m.swizzle_g = s;
             }
             if (@constCast(self)._pending_swizzle_b) |s| {
-                if (loaded) gl.textures.parameterI(effective_target, .texture_swizzle_b, @intCast(@intFromEnum(s)));
+                if (loaded) gl.textures.parameterI(effective_target, .texture_swizzle_b, @intCast(@backingInt(s)));
                 m.swizzle_b = s;
             }
             if (@constCast(self)._pending_swizzle_a) |s| {
-                if (loaded) gl.textures.parameterI(effective_target, .texture_swizzle_a, @intCast(@intFromEnum(s)));
+                if (loaded) gl.textures.parameterI(effective_target, .texture_swizzle_a, @intCast(@backingInt(s)));
                 m.swizzle_a = s;
             }
             if (@constCast(self)._pending_param_i) |p| if (loaded) gl.textures.parameterI(effective_target, p.pname, p.param);

@@ -1,4 +1,4 @@
-﻿/// Standard library import providing allocation and memory utilities.
+/// Standard library import providing allocation and memory utilities.
 const std = @import("std");
 /// OpenGL bindings import providing buffer targets, usage flags and GL buffer functions.
 const gl = @import("gl");

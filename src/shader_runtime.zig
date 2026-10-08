@@ -105,11 +105,11 @@ pub fn uploadUniformValue(loc: i32, comptime T: type, value: T) void {
 ///
 /// Returns: void.
 pub fn flattenUniforms(program: u32, comptime prefix: []const u8, comptime T: type, value: T) void {
-    inline for (@typeInfo(T).@"struct".fields) |f| {
-        const path: [:0]const u8 = if (prefix.len == 0) f.name else std.fmt.comptimePrint("{s}.{s}", .{ prefix, f.name });
+    inline for (@typeInfo(T).@"struct".field_names) |field_name| {
+        const path: [:0]const u8 = if (prefix.len == 0) field_name else std.fmt.comptimePrint("{s}.{s}", .{ prefix, field_name });
         const loc = gl.uniforms.location(program, path);
         if (loc != -1) {
-            const fv = @field(value, f.name);
+            const fv = @field(value, field_name);
             const FT = @TypeOf(fv);
             if (@typeInfo(FT) == .@"struct" and !isVecType(FT) and !isMatType(FT)) {
                 flattenUniforms(program, path, FT, fv);
@@ -160,8 +160,7 @@ pub fn applyUniforms(
     set_all: bool,
     dirty: anytype,
 ) void {
-    inline for (@typeInfo(UniformT).@"struct".fields, 0..) |field, field_i| {
-        const name = field.name;
+    inline for (@typeInfo(UniformT).@"struct".field_names, 0..) |name, field_i| {
         const is_dirty = if (set_all) true else @field(dirty, name);
         if (is_dirty) {
             const value = @field(pending, name);
@@ -171,7 +170,7 @@ pub fn applyUniforms(
             if (comptime isOptionalSampler(T)) {
                 if (loc != -1) {
                     const unit: u32 = comptime samplerUnitFor(UniformT, field_i);
-                    gl.textures.activeTexture(@enumFromInt(@intFromEnum(gl.textures.TextureUnit.texture0) + unit));
+                    gl.textures.activeTexture(@fromBackingInt(@intCast(@backingInt(gl.textures.TextureUnit.texture0) + unit)));
                     if (value) |tex| {
                         gl.textures.bind(.texture_2d, tex.getId());
                     } else {
@@ -193,7 +192,7 @@ pub fn applyUniforms(
                 }
             } else if (loc != -1 and (T == Texture or T == *const Texture or T == *Texture)) {
                 const unit: u32 = comptime samplerUnitFor(UniformT, field_i);
-                gl.textures.activeTexture(@enumFromInt(@intFromEnum(gl.textures.TextureUnit.texture0) + unit));
+                gl.textures.activeTexture(@fromBackingInt(@intCast(@backingInt(gl.textures.TextureUnit.texture0) + unit)));
                 gl.textures.bind(.texture_2d, value.getId());
                 gl.uniforms.uniform1i(loc, @intCast(unit));
             } else if (@typeInfo(DerefT) == .@"opaque" and @hasDecl(DerefT, "DataType")) {
@@ -217,7 +216,7 @@ pub fn applyUniforms(
         }
     }
     const DirtyT = @typeInfo(@TypeOf(dirty)).pointer.child;
-    inline for (@typeInfo(DirtyT).@"struct".fields) |f| @field(dirty, f.name) = false;
+    inline for (@typeInfo(DirtyT).@"struct".field_names) |dirty_name| @field(dirty, dirty_name) = false;
 }
 
 /// Returns the texture unit for the sampler field at `field_i`: the count
@@ -225,9 +224,9 @@ pub fn applyUniforms(
 /// order, so every sampler gets a stable unit regardless of dirty flags.
 fn samplerUnitFor(comptime UniformT: type, comptime field_i: usize) u32 {
     var unit: u32 = 0;
-    inline for (@typeInfo(UniformT).@"struct".fields, 0..) |f, i| {
+    const sinfo = @typeInfo(UniformT).@"struct";
+    inline for (sinfo.field_names, sinfo.field_types, 0..) |_, FT, i| {
         if (i >= field_i) break;
-        const FT = f.type;
         if (comptime isOptionalSampler(FT) or FT == Texture or FT == *const Texture or FT == *Texture) unit += 1;
     }
     return unit;

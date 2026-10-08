@@ -1992,8 +1992,8 @@ test "any program wrap/meta/validation without GL" {
     try std.testing.expectEqualStrings(@typeName(FakeVertP), rec.vert_name);
     try std.testing.expect(rec.has_frag);
     try std.testing.expectEqualStrings(@typeName(FakeFragP), rec.frag_name.?);
-    const empty_vert: [@sizeOf(FakeProgramP.VertDefines)]u8 = [_]u8{0} ** @sizeOf(FakeProgramP.VertDefines);
-    const empty_frag: [@sizeOf(FakeProgramP.FragDefines)]u8 = [_]u8{0} ** @sizeOf(FakeProgramP.FragDefines);
+    const empty_vert: [@sizeOf(FakeProgramP.VertDefines)]u8 = @splat(0);
+    const empty_frag: [@sizeOf(FakeProgramP.FragDefines)]u8 = @splat(0);
     try std.testing.expectEqual(@as(u32, 42), try rec.instance(alloc, &empty_vert, &empty_frag));
     try std.testing.expectEqual(@as(u32, 42), rec.getIdFor(&empty_vert, &empty_frag));
     try std.testing.expectEqual(@as(usize, 1), rec.vertex_inputs.len);

@@ -85,8 +85,8 @@ pub const GlslDescriptor = struct {
                     const zig_type = try common.mapGLSLTypeToZig(allocator, f.typ);
                     defer allocator.free(zig_type);
                     const full_type: []u8 = if (f.is_array) blk: {
-                        if (f.array_len) |len| break :blk try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
-                        break :blk try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
+                        if (f.array_len) |len| break :blk try allocator.print("[{d}]{s}", .{ len, zig_type });
+                        break :blk try allocator.print("[]{s}", .{zig_type});
                     } else try allocator.dupe(u8, zig_type);
                     defer allocator.free(full_type);
                     // .glsl structs hold numeric/nested data only (opaque and
@@ -103,7 +103,7 @@ pub const GlslDescriptor = struct {
 
         const new_line_after = if (inner_slice.len > 0 and inner_slice[inner_slice.len - 1] == '\n') "" else "\n";
 
-        return std.fmt.allocPrint(allocator, "{s}pub const {s} = struct {{\n{s}{s}{s}}};\n", .{
+        return allocator.print("{s}pub const {s} = struct {{\n{s}{s}{s}}};\n", .{
             prefix orelse "",
             var_name,
             inner_slice,

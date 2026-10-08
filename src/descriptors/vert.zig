@@ -122,7 +122,7 @@ pub const VertexDescriptor = struct {
                     // include instead of duplicating it here.
                     try inner.appendSlice(allocator, "    pub const ");
                     try inner.appendSlice(allocator, s.name);
-                    const link_line = try std.fmt.allocPrint(allocator, " = {s}.{s};\n", .{ ident, s.name });
+                    const link_line = try allocator.print(" = {s}.{s};\n", .{ ident, s.name });
                     defer allocator.free(link_line);
                     try inner.appendSlice(allocator, link_line);
                     continue;
@@ -134,8 +134,8 @@ pub const VertexDescriptor = struct {
                     const zig_type = try common.mapGLSLTypeToZig(allocator, f.typ);
                     defer allocator.free(zig_type);
                     const full_type: []u8 = if (f.is_array) blk: {
-                        if (f.array_len) |len| break :blk try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
-                        break :blk try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
+                        if (f.array_len) |len| break :blk try allocator.print("[{d}]{s}", .{ len, zig_type });
+                        break :blk try allocator.print("[]{s}", .{zig_type});
                     } else try allocator.dupe(u8, zig_type);
                     defer allocator.free(full_type);
                     try common.appendGeneratedField(allocator, &inner, "        ", f.name, full_type, false);
@@ -157,8 +157,8 @@ pub const VertexDescriptor = struct {
                             const zig_type = try common.mapGLSLTypeToZig(allocator, f.typ);
                             defer allocator.free(zig_type);
                             const full_type: []u8 = if (f.is_array) blk: {
-                                if (f.array_len) |len| break :blk try std.fmt.allocPrint(allocator, "[{d}]{s}", .{ len, zig_type });
-                                break :blk try std.fmt.allocPrint(allocator, "[]{s}", .{zig_type});
+                                if (f.array_len) |len| break :blk try allocator.print("[{d}]{s}", .{ len, zig_type });
+                                break :blk try allocator.print("[]{s}", .{zig_type});
                             } else try allocator.dupe(u8, zig_type);
                             defer allocator.free(full_type);
                             try common.appendGeneratedField(allocator, &inner, "        ", f.name, full_type, false);
@@ -212,12 +212,12 @@ pub const VertexDescriptor = struct {
         }
         var uniform_outer = std.ArrayList(u8).empty;
         defer uniform_outer.deinit(allocator);
-        const uniform_type_name = try std.fmt.allocPrint(allocator, "{s}_Uniform", .{var_name});
+        const uniform_type_name = try allocator.print("{s}_Uniform", .{var_name});
         defer allocator.free(uniform_type_name);
         try uniform_outer.appendSlice(allocator, "const ");
         try uniform_outer.appendSlice(allocator, uniform_type_name);
         try uniform_outer.appendSlice(allocator, " = struct {\n");
-        const owner_line = try std.fmt.allocPrint(allocator, "    pub const Owner = {s};\n", .{var_name});
+        const owner_line = try allocator.print("    pub const Owner = {s};\n", .{var_name});
         defer allocator.free(owner_line);
         try uniform_outer.appendSlice(allocator, owner_line);
         for (uniforms) |u| {
@@ -229,14 +229,14 @@ pub const VertexDescriptor = struct {
                     // Block struct is emitted inside the shader (`Owner.Block`),
                     // while this Uniform lives as a sibling top-level decl,
                     // so a bare name would not resolve: qualify through Owner.
-                    break :blk try std.fmt.allocPrint(allocator, "*const @import(\"gl_graphics\").Buffer(Owner.{s})", .{inner_t});
+                    break :blk try allocator.print("*const @import(\"gl_graphics\").Buffer(Owner.{s})", .{inner_t});
                 } else if (u.is_sampler) {
                     break :blk try allocator.dupe(u8, "*const @import(\"gl_graphics\").Texture");
                 } else {
                     if (struct_map.contains(u.glsl_type)) {
                         // Custom struct (local or via #include) lives inside the
                         // shader struct; qualify through Owner from the sibling.
-                        break :blk try std.fmt.allocPrint(allocator, "Owner.{s}", .{u.glsl_type});
+                        break :blk try allocator.print("Owner.{s}", .{u.glsl_type});
                     } else {
                         break :blk try common.mapGLSLTypeToZig(allocator, u.glsl_type);
                     }
@@ -276,7 +276,7 @@ pub const VertexDescriptor = struct {
             try inner.appendSlice(allocator, ": struct { name: [:0]const u8, point: u32 } = .{ .name = \"");
             try inner.appendSlice(allocator, u.glsl_type);
             try inner.appendSlice(allocator, "\", .point = ");
-            const bp = try std.fmt.allocPrint(allocator, "{d}", .{bind_point});
+            const bp = try allocator.print("{d}", .{bind_point});
             defer allocator.free(bp);
             try inner.appendSlice(allocator, bp);
             try inner.appendSlice(allocator, " };\n");
@@ -306,7 +306,7 @@ pub const VertexDescriptor = struct {
                 if (u.kind == .block) {
                     const inner_t = try common.mapGLSLTypeToZig(allocator, u.glsl_type);
                     defer allocator.free(inner_t);
-                    break :blk try std.fmt.allocPrint(allocator, "?*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
+                    break :blk try allocator.print("?*const @import(\"gl_graphics\").Buffer({s})", .{inner_t});
                 } else if (u.is_sampler) {
                     break :blk try allocator.dupe(u8, "?*const @import(\"gl_graphics\").Texture");
                 } else {
@@ -318,7 +318,7 @@ pub const VertexDescriptor = struct {
                 }
             };
             defer allocator.free(zig_param_type);
-            const method_name = try std.fmt.allocPrint(allocator, "        pub fn set_{s}(self: *const Editor, value: {s}) *const Editor {{ @constCast(self)._pending.{s} = value; @constCast(self)._dirty.{s} = true; return @constCast(self); }}\n", .{ u.name, zig_param_type, u.name, u.name });
+            const method_name = try allocator.print("        pub fn set_{s}(self: *const Editor, value: {s}) *const Editor {{ @constCast(self)._pending.{s} = value; @constCast(self)._dirty.{s} = true; return @constCast(self); }}\n", .{ u.name, zig_param_type, u.name, u.name });
             defer allocator.free(method_name);
             try inner.appendSlice(allocator, method_name);
         }
@@ -336,7 +336,7 @@ pub const VertexDescriptor = struct {
         } else {
             try inner.appendSlice(allocator, "        const texts = [_][]const u8{\n");
             for (enum_defs) |d| {
-                const tline = try std.fmt.allocPrint(allocator, "            defines.{s}.text(),\n", .{d.field});
+                const tline = try allocator.print("            defines.{s}.text(),\n", .{d.field});
                 defer allocator.free(tline);
                 try inner.appendSlice(allocator, tline);
             }
@@ -377,7 +377,7 @@ pub const VertexDescriptor = struct {
         const uniform_outer_slice = try uniform_outer.toOwnedSlice(allocator);
         defer allocator.free(uniform_outer_slice);
 
-        const outer = try std.fmt.allocPrint(allocator, "{s}{s}\n{s}pub const {s} = struct {{\n{s}{s}{s}}};\n", .{ prefix orelse "", uniform_outer_slice, prefix orelse "", var_name, inner_slice, if (inner_slice.len > 0 and inner_slice[inner_slice.len - 1] == '\n') "" else "\n", prefix orelse "" });
+        const outer = try allocator.print("{s}{s}\n{s}pub const {s} = struct {{\n{s}{s}{s}}};\n", .{ prefix orelse "", uniform_outer_slice, prefix orelse "", var_name, inner_slice, if (inner_slice.len > 0 and inner_slice[inner_slice.len - 1] == '\n') "" else "\n", prefix orelse "" });
         return outer;
     }
 

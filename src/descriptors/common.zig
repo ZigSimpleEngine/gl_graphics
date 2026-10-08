@@ -188,7 +188,7 @@ pub fn stripLayouts(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
 /// Returns: newly allocated Zig type string.
 pub fn mapGLSLTypeToZig(allocator: std.mem.Allocator, glsl_type: []const u8) ![]u8 {
     if (std.mem.startsWith(u8, glsl_type, "sampler")) {
-        return std.fmt.allocPrint(allocator, "*const @import(\"gl_graphics\").Texture", .{});
+        return allocator.print("*const @import(\"gl_graphics\").Texture", .{});
     }
     const builtin = std.StaticStringMap([]const u8).initComptime(.{
         .{ "float", "f32" },
@@ -687,7 +687,7 @@ pub fn resolveIncludePath(allocator: std.mem.Allocator, baseFilePath: []const u8
     // Forward slashes to match `Node.createPath` convention (and the error
     // output): `std.fs.path.join` would emit `\` on Windows, mixing
     // separators inside one resolved path. Windows opens `/` paths fine.
-    return std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir, includeRaw });
+    return allocator.print("{s}/{s}", .{ dir, includeRaw });
 }
 
 /// Tracks own-line runs for one file while `processShaderFile` emits output.
@@ -981,12 +981,12 @@ fn isReservedTagName(name: []const u8) bool {
 /// `-0xC` -> `_m0xC` (case preserved). Identifier: as is.
 fn enumTagForToken(allocator: std.mem.Allocator, token: []const u8) ![]u8 {
     if (isDecIntToken(token)) {
-        if (token[0] == '-') return std.fmt.allocPrint(allocator, "_m{s}", .{token[1..]});
-        return std.fmt.allocPrint(allocator, "_{s}", .{token});
+        if (token[0] == '-') return allocator.print("_m{s}", .{token[1..]});
+        return allocator.print("_{s}", .{token});
     }
     if (isHexIntToken(token)) {
-        if (token[0] == '-') return std.fmt.allocPrint(allocator, "_m{s}", .{token[1..]});
-        return std.fmt.allocPrint(allocator, "_{s}", .{token});
+        if (token[0] == '-') return allocator.print("_m{s}", .{token[1..]});
+        return allocator.print("_{s}", .{token});
     }
     return allocator.dupe(u8, token);
 }
@@ -1791,7 +1791,7 @@ pub fn appendEnumDefinesCode(
     try inner.appendSlice(allocator, ";\n");
     try inner.appendSlice(allocator, "    const define_slots = [_]@import(\"gl_graphics\").DefineSlot{\n");
     for (enum_defs) |d| {
-        const line = try std.fmt.allocPrint(allocator, "        .{{ .offset = {d}, .len = {d} }},\n", .{ d.slot_offset, d.slot_len });
+        const line = try allocator.print("        .{{ .offset = {d}, .len = {d} }},\n", .{ d.slot_offset, d.slot_len });
         defer allocator.free(line);
         try inner.appendSlice(allocator, line);
     }
@@ -2133,7 +2133,7 @@ test "nested include origin resolves to inner file with chain" {
     try tmp.dir.writeFile(io, .{ .sub_path = "main.vert", .data = "#version 300 es\n#include \"a.glsl\"\nvoid main() {}\n" });
     try tmp.dir.writeFile(io, .{ .sub_path = "a.glsl", .data = "#include \"b.glsl\"\nstruct Light { vec3 p; }\n" });
     try tmp.dir.writeFile(io, .{ .sub_path = "b.glsl", .data = "struct Uniform { vec3 m; }\n" });
-    const main_path = try std.fmt.allocPrint(alloc, ".zig-cache/tmp/{s}/main.vert", .{tmp.sub_path[0..]});
+    const main_path = try alloc.print(".zig-cache/tmp/{s}/main.vert", .{tmp.sub_path[0..]});
     defer alloc.free(main_path);
 
     var main_file = try tmp.dir.openFile(io, "main.vert", .{});

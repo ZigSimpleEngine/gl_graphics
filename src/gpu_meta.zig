@@ -69,12 +69,13 @@ pub fn describe(comptime T: type) TypeDesc {
         return .{ .name = @typeName(T), .size = @sizeOf(T), .alignment = @alignOf(T), .fields = &.{} };
     }
     var acc: []const FieldDesc = &.{};
-    inline for (ti.@"struct".fields) |f| {
+    const sinfo = ti.@"struct";
+    inline for (sinfo.field_names, sinfo.field_types) |fname, FType| {
         acc = acc ++ [_]FieldDesc{.{
-            .name = f.name,
-            .type_name = @typeName(f.type),
-            .size = @sizeOf(f.type),
-            .alignment = @alignOf(f.type),
+            .name = fname,
+            .type_name = @typeName(FType),
+            .size = @sizeOf(FType),
+            .alignment = @alignOf(FType),
         }};
     }
     return .{ .name = @typeName(T), .size = @sizeOf(T), .alignment = @alignOf(T), .fields = acc };

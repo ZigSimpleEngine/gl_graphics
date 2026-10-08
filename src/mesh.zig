@@ -267,7 +267,7 @@ pub fn Mesh(comptime Vertex: type) type {
             const minfo = @typeInfo(Vertex).@"struct";
             var names: [minfo.field_names.len][]const u8 = undefined;
             var types: [minfo.field_names.len]type = undefined;
-            var attrs: [minfo.field_names.len]std.lang.Type.StructField.Attributes = undefined;
+            var attrs: [minfo.field_names.len]std.lang.Type.Struct.FieldAttributes = undefined;
             for (minfo.field_names, minfo.field_types, 0..) |fname, FType, i| {
                 names[i] = fname;
                 types[i] = []const FType;
@@ -607,7 +607,7 @@ pub fn Mesh(comptime Vertex: type) type {
                 if (soa_info != .@"struct") @compileError("SOA must be a struct");
                 const vertex_info = @typeInfo(Vertex);
                 if (vertex_info != .@"struct") @compileError("Vertex must be a struct");
-                const vertex_fields = vertex_info.@"struct".fields;
+                const vertex_field_names = vertex_info.@"struct".field_names;
 
                 // Reset any previous SOA pending state.
                 mut._using_soa = false;
@@ -617,11 +617,11 @@ pub fn Mesh(comptime Vertex: type) type {
 
                 // Determine element count from the first non-empty field.
                 var count: usize = 0;
-                const soa_fields = soa_info.@"struct".fields;
-                if (soa_fields.len > 0) {
-                    count = @field(soa, soa_fields[0].name).len;
-                    inline for (soa_fields) |f| {
-                        if (@field(soa, f.name).len != count) @panic("SOA fields length mismatch");
+                const soa_field_names = soa_info.@"struct".field_names;
+                if (soa_field_names.len > 0) {
+                    count = @field(soa, soa_field_names[0]).len;
+                    inline for (soa_field_names) |fname| {
+                        if (@field(soa, fname).len != count) @panic("SOA fields length mismatch");
                     }
                 }
                 if (count == 0) {
@@ -631,9 +631,9 @@ pub fn Mesh(comptime Vertex: type) type {
                 }
 
                 // Match each vertex field to its SOA slice and store raw bytes.
-                inline for (vertex_fields, 0..) |vf, fi| {
-                    if (@hasField(SoaT, vf.name)) {
-                        const slice = @field(soa, vf.name);
+                inline for (vertex_field_names, 0..) |vf_name, fi| {
+                    if (@hasField(SoaT, vf_name)) {
+                        const slice = @field(soa, vf_name);
                         if (slice.len != count) @panic("SOA field length mismatch");
                         mut._pending_soa_fields[fi] = std.mem.sliceAsBytes(slice);
                     }
@@ -685,7 +685,7 @@ pub fn Mesh(comptime Vertex: type) type {
                     }
                     var names: [present][]const u8 = undefined;
                     var types: [present]type = undefined;
-                    var attrs: [present]std.lang.Type.StructField.Attributes = undefined;
+                    var attrs: [present]std.lang.Type.Struct.FieldAttributes = undefined;
                     var idx: usize = 0;
                     for (vInfo.@"struct".field_names, vInfo.@"struct".field_types) |vf_name, vf_type| {
                         if (@hasField(Source, vf_name)) {

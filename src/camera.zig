@@ -88,7 +88,7 @@ pub fn Camera(comptime scalar_type_: type) type {
         }
 
         fn castFromF32(m: math.Mat(4, 4, f32)) Mat4 {
-            if (Scalar == f32) return @bitCast(m);
+            if (Scalar == f32) return m;
             var res = Mat4.identity();
             inline for (0..4) |c| {
                 inline for (0..4) |r| {
@@ -99,7 +99,7 @@ pub fn Camera(comptime scalar_type_: type) type {
         }
 
         fn castToF32(m: Mat4) math.Mat(4, 4, f32) {
-            if (Scalar == f32) return @bitCast(m);
+            if (Scalar == f32) return m;
             var res = math.Mat(4, 4, f32).identity();
             inline for (0..4) |c| {
                 inline for (0..4) |r| {

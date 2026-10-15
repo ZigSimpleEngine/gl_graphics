@@ -1,4 +1,4 @@
-﻿/// Standard library import providing allocation and utility functions.
+/// Standard library import providing allocation and utility functions.
 const std = @import("std");
 /// OpenGL bindings import providing texture targets, formats, filters and GL functions.
 const gl = @import("gl");
@@ -66,7 +66,8 @@ const Impl = struct {
 /// format, filtering, wrapping, swizzle and LOD state. Use `edit` to obtain
 /// an `Editor` for deferred, batched state changes.
 pub const Texture = opaque {
-    /// Returns a mutable pointer to the underlying `Impl` storage.
+    /// Reinterprets this opaque handle as mutable cached state. No GL call.
+    /// Use it when `Editor.apply` or `destroy` must sync the CPU cache with GL.
     /// Parameters:
     ///   - self: Opaque texture handle to reinterpret as `Impl`.
     ///
@@ -75,7 +76,8 @@ pub const Texture = opaque {
     inline fn impl(self: *Texture) *Impl {
         return @ptrCast(@alignCast(self));
     }
-    /// Returns a const pointer to the underlying `Impl` storage.
+    /// Reinterprets this opaque handle as read-only cached state. No GL call.
+    /// Use it for all `get*` getters so they stay zero-cost cache reads.
     /// Parameters:
     ///   - self: Const opaque texture handle to reinterpret as `Impl`.
     ///
@@ -85,8 +87,10 @@ pub const Texture = opaque {
         return @ptrCast(@alignCast(self));
     }
 
-    /// Creates a new texture object.
-    /// Allocates `Impl`, initializes it with defaults and generates a GL texture name.
+    /// Allocates CPU state and generates a GL texture name via `glGenTextures`.
+    /// Call once before any `edit().set*().apply()` chain; pair with `destroy`.
+    /// Does not allocate image storage — follow with `setStorage2D` (immutable,
+    /// preferred) or `setImage2D` (mutable, resizable).
     /// Parameters:
     ///   - allocator: Allocator used to allocate the `Impl` structure.
     ///
@@ -106,8 +110,9 @@ pub const Texture = opaque {
         return @ptrCast(m);
     }
 
-    /// Destroys the texture object and frees its storage.
-    /// Deletes the GL texture name if non-zero and destroys the `Impl` allocation.
+    /// Deletes the GL name (if any) and frees CPU state. No-op on GL side when
+    /// the driver is not loaded. Call when the texture is no longer used as a
+    /// sampled image or framebuffer attachment.
     /// Parameters:
     ///   - self: Texture to destroy.
     ///   - allocator: Allocator that was used to create the texture.
@@ -120,7 +125,8 @@ pub const Texture = opaque {
         allocator.destroy(m);
     }
 
-    /// Checks whether the texture name corresponds to a valid GL texture.
+    /// Issues `glIsTexture` for the cached id. Use to detect a deleted or
+    /// never-created GL name before binding; cached getters alone cannot tell.
     /// Parameters:
     ///   - self: Texture to validate.
     ///
@@ -131,7 +137,8 @@ pub const Texture = opaque {
         return m.id != 0 and gl.textures.isTexture(m.id);
     }
 
-    /// Returns the GL texture object name (ID).
+    /// Reads the cached GL texture name. No GL call. Pass it to framebuffer
+    /// attach calls or raw GL functions that need a plain `u32` id.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -140,7 +147,9 @@ pub const Texture = opaque {
     pub fn getId(self: *const Texture) u32 {
         return self.implConst().id;
     }
-    /// Returns the texture binding target.
+    /// Reads the cached binding target (e.g. `.texture_2d`, `.texture_2d_array`).
+    /// No GL call. It decides how `bind` interprets the image and which
+    /// `setStorage*/setImage*` variant is legal. Change via `edit().setTarget()`.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -149,7 +158,9 @@ pub const Texture = opaque {
     pub fn getTarget(self: *const Texture) gl.textures.TextureTarget {
         return self.implConst().target;
     }
-    /// Returns the sized internal format, if set.
+    /// Reads the cached sized internal format (e.g. `.rgba8`). No GL call.
+    /// Null means no `setStorage*`/`setImage*` has run yet, so the texture has
+    /// no defined storage and is not yet usable for sampling or attachment.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -158,34 +169,42 @@ pub const Texture = opaque {
     pub fn getInternalFormat(self: *const Texture) ?gl.textures.InternalFormat {
         return self.implConst().internal_format;
     }
-    /// Returns the base level width in texels.
+    /// Reads the cached base-level width in texels (not pixels/screen coords).
+    /// No GL call. Texels are texture image elements addressed by normalized
+    /// UV `0-1` in shaders, unlike framebuffer pixels in window coords.
     /// Parameters:
     ///   - self: Texture to query.
     ///
     /// Returns:
-    ///   - Width as `i32`.
+    ///   - Width in texels as `i32`.
     pub fn getWidth(self: *const Texture) i32 {
         return self.implConst().width;
     }
-    /// Returns the base level height in texels.
+    /// Reads the cached base-level height in texels. No GL call.
+    /// Units: texels. Zero for 1D textures.
     /// Parameters:
     ///   - self: Texture to query.
     ///
     /// Returns:
-    ///   - Height as `i32`.
+    ///   - Height in texels as `i32`.
     pub fn getHeight(self: *const Texture) i32 {
         return self.implConst().height;
     }
-    /// Returns the base level depth in texels.
+    /// Reads the cached depth in texels. No GL call.
+    /// Units: texels along R/W axis. Only meaningful for 3D/array targets;
+    /// zero for plain 2D textures.
     /// Parameters:
     ///   - self: Texture to query.
     ///
     /// Returns:
-    ///   - Depth as `i32`.
+    ///   - Depth in texels as `i32`.
     pub fn getDepth(self: *const Texture) i32 {
         return self.implConst().depth;
     }
-    /// Returns the number of mipmap levels.
+    /// Reads the cached mipmap level count from the last storage call.
+    /// No GL call. Units: count (level `0` = full-size base, each higher level
+    /// halves width/height). Needed to pick a valid `level` for `setImage*` and
+    /// to size `min_filter`/`base/max_level` correctly.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -194,7 +213,9 @@ pub const Texture = opaque {
     pub fn getLevels(self: *const Texture) i32 {
         return self.implConst().levels;
     }
-    /// Returns the external pixel format, if known.
+    /// Reads the cached CPU upload format (e.g. `.rgba`). No GL call.
+    /// This is the `format` you passed to `setImage*`/`setSubImage*`; it
+    /// describes your client data layout, not GPU storage. Null if never uploaded.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -203,7 +224,9 @@ pub const Texture = opaque {
     pub fn getPixelFormat(self: *const Texture) ?gl.textures.PixelFormat {
         return self.implConst().pixel_format;
     }
-    /// Returns the pixel data type, if known.
+    /// Reads the cached CPU upload type (e.g. `.unsigned_byte`). No GL call.
+    /// Paired with `getPixelFormat`; tells how to interpret `pixels` bytes.
+    /// Null if never uploaded.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -212,7 +235,10 @@ pub const Texture = opaque {
     pub fn getDataType(self: *const Texture) ?gl.enums.DataType {
         return self.implConst().data_type;
     }
-    /// Returns the minification filter.
+    /// Reads the cached minification filter. No GL call. It selects which
+    /// mipmap levels the sampler blends when one texel maps to less than one
+    /// screen pixel (minified). Mipmap filters require generated mipmaps or the
+    /// texture is incomplete; use `setGenerateMipmap` or `apply` auto-gen.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -221,7 +247,9 @@ pub const Texture = opaque {
     pub fn getMinFilter(self: *const Texture) gl.textures.TextureMinFilter {
         return self.implConst().min_filter;
     }
-    /// Returns the magnification filter.
+    /// Reads the cached magnification filter. No GL call. It selects point vs
+    /// bilinear sampling when one texel covers many screen pixels (magnified).
+    /// Unlike min filter it never needs mipmaps.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -230,7 +258,9 @@ pub const Texture = opaque {
     pub fn getMagFilter(self: *const Texture) gl.textures.TextureMagFilter {
         return self.implConst().mag_filter;
     }
-    /// Returns the wrap mode for the S coordinate.
+    /// Reads the cached wrap mode for S (U axis). No GL call.
+    /// Units: applies to normalized UV where `0-1` spans the image; controls
+    /// sampling outside `0-1` (repeat tiling vs clamp/mirror). Use for tiling ground.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -239,7 +269,8 @@ pub const Texture = opaque {
     pub fn getWrapS(self: *const Texture) gl.textures.TextureWrap {
         return self.implConst().wrap_s;
     }
-    /// Returns the wrap mode for the T coordinate.
+    /// Reads the cached wrap mode for T (V axis). No GL call.
+    /// Units: normalized UV `0-1`. See `getWrapS`.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -248,7 +279,8 @@ pub const Texture = opaque {
     pub fn getWrapT(self: *const Texture) gl.textures.TextureWrap {
         return self.implConst().wrap_t;
     }
-    /// Returns the wrap mode for the R coordinate.
+    /// Reads the cached wrap mode for R (W axis). No GL call.
+    /// Units: normalized depth UV `0-1`. Only used by 3D/array sampling.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -257,7 +289,9 @@ pub const Texture = opaque {
     pub fn getWrapR(self: *const Texture) gl.textures.TextureWrap {
         return self.implConst().wrap_r;
     }
-    /// Returns the depth texture comparison mode.
+    /// Reads the cached depth-compare mode. No GL call. When `.compare_ref_to_texture`
+    /// sampling returns a `0-1` shadow-test result instead of a depth value —
+    /// use for shadow maps; keep `.none` for color textures.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -266,7 +300,8 @@ pub const Texture = opaque {
     pub fn getCompareMode(self: *const Texture) gl.textures.CompareMode {
         return self.implConst().compare_mode;
     }
-    /// Returns the depth comparison function.
+    /// Reads the cached depth-compare function (e.g. `.lequal`). No GL call.
+    /// Only matters when compare mode is enabled; picks pass/fail rule for shadows.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -275,7 +310,9 @@ pub const Texture = opaque {
     pub fn getCompareFunc(self: *const Texture) gl.textures.CompareFunc {
         return self.implConst().compare_func;
     }
-    /// Returns the base mipmap level.
+    /// Reads the cached base mipmap level. No GL call.
+    /// Units: level index (`0` = full-size base). Raise to ignore the largest
+    /// levels for perf or streaming.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -284,7 +321,8 @@ pub const Texture = opaque {
     pub fn getBaseLevel(self: *const Texture) i32 {
         return self.implConst().base_level;
     }
-    /// Returns the maximum mipmap level.
+    /// Reads the cached max mipmap level. No GL call.
+    /// Units: level index. Lower to clamp to blurrier/smaller levels.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -293,7 +331,9 @@ pub const Texture = opaque {
     pub fn getMaxLevel(self: *const Texture) i32 {
         return self.implConst().max_level;
     }
-    /// Returns the minimum level-of-detail value.
+    /// Reads the cached minimum LOD clamp. No GL call.
+    /// Units: float LOD in mipmap levels (unitless, `0` = base sharpness).
+    /// Finer than integer `base_level`; use for LOD bias/fade.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -302,7 +342,8 @@ pub const Texture = opaque {
     pub fn getMinLod(self: *const Texture) f32 {
         return self.implConst().min_lod;
     }
-    /// Returns the maximum level-of-detail value.
+    /// Reads the cached maximum LOD clamp. No GL call.
+    /// Units: float LOD in mipmap levels. Use to cap blur.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -311,7 +352,8 @@ pub const Texture = opaque {
     pub fn getMaxLod(self: *const Texture) f32 {
         return self.implConst().max_lod;
     }
-    /// Returns the swizzle component for the red channel.
+    /// Reads the cached red-channel swizzle. No GL call. Swizzle remaps sampled
+    /// channels without re-uploading — use to expand `R` to `RGBA` or mask alpha.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -320,7 +362,7 @@ pub const Texture = opaque {
     pub fn getSwizzleR(self: *const Texture) gl.textures.Swizzle {
         return self.implConst().swizzle_r;
     }
-    /// Returns the swizzle component for the green channel.
+    /// Reads the cached green-channel swizzle. No GL call. See `getSwizzleR`.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -329,7 +371,7 @@ pub const Texture = opaque {
     pub fn getSwizzleG(self: *const Texture) gl.textures.Swizzle {
         return self.implConst().swizzle_g;
     }
-    /// Returns the swizzle component for the blue channel.
+    /// Reads the cached blue-channel swizzle. No GL call. See `getSwizzleR`.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -338,7 +380,7 @@ pub const Texture = opaque {
     pub fn getSwizzleB(self: *const Texture) gl.textures.Swizzle {
         return self.implConst().swizzle_b;
     }
-    /// Returns the swizzle component for the alpha channel.
+    /// Reads the cached alpha-channel swizzle. No GL call. See `getSwizzleR`.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -347,7 +389,8 @@ pub const Texture = opaque {
     pub fn getSwizzleA(self: *const Texture) gl.textures.Swizzle {
         return self.implConst().swizzle_a;
     }
-    /// Returns whether mipmaps have been generated.
+    /// Reads whether `generateMipmap` has run for this texture. Cached flag, no GL call.
+    /// Needed because mipmap min filters make the texture incomplete until set.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -356,7 +399,9 @@ pub const Texture = opaque {
     pub fn getHasMipmap(self: *const Texture) bool {
         return self.implConst().has_mipmap;
     }
-    /// Returns the cached active texture unit.
+    /// Reads the last texture unit this texture was assigned to. No GL call.
+    /// Units: texture-unit slot (`texture0 + N`, `0..GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS-1`).
+    /// It must match the sampler uniform; set via `bindToUnit` or `edit().setActiveUnit()`.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -366,17 +411,19 @@ pub const Texture = opaque {
         return self.implConst().active_unit;
     }
 
-    /// Returns the texture dimensions as a struct.
+    /// Reads cached dimensions in one call. No GL call.
+    /// Units: texels (`w` = width, `h` = height, `d` = depth; `0` means unused axis).
     /// Parameters:
     ///   - self: Texture to query.
     ///
     /// Returns:
-    ///   - Anonymous struct with fields `w`, `h`, `d` representing width, height and depth.
+    ///   - Anonymous struct with fields `w`, `h`, `d` in texels.
     pub fn getSize(self: *const Texture) struct { w: i32, h: i32, d: i32 } {
         const m = self.implConst();
         return .{ .w = m.width, .h = m.height, .d = m.depth };
     }
-    /// Returns the four component swizzle values.
+    /// Reads all four cached swizzles in RGBA order. No GL call.
+    /// Use to preview channel remapping without four separate getters.
     /// Parameters:
     ///   - self: Texture to query.
     ///
@@ -387,7 +434,9 @@ pub const Texture = opaque {
         return .{ m.swizzle_r, m.swizzle_g, m.swizzle_b, m.swizzle_a };
     }
 
-    /// Binds the texture to its current target using the current active unit.
+    /// Makes this texture current on its cached target (`glBindTexture`).
+    /// Uses the already-active texture unit. Call before drawing with it; for
+    /// multi-texture shaders prefer `bindToUnit` so unit and sampler agree.
     /// Parameters:
     ///   - self: Texture to bind.
     ///
@@ -397,11 +446,12 @@ pub const Texture = opaque {
         const m = self.implConst();
         gl.textures.bind(m.target, m.id);
     }
-    /// Binds the texture to a specific texture unit.
-    /// Activates the given unit and then binds the texture.
+    /// Selects a texture-unit slot and then binds (units: `texture0 + N`).
+    /// Use when a shader has several samplers — each texture needs its own unit
+    /// matching its sampler uniform. Does not update the cached `active_unit`.
     /// Parameters:
     ///   - self: Texture to bind.
-    ///   - unit: Texture unit to activate before binding.
+    ///   - unit: Texture-unit slot to activate before binding (e.g. `.texture0`).
     ///
     /// Returns:
     ///   - void.
@@ -409,7 +459,8 @@ pub const Texture = opaque {
         gl.textures.activeTexture(unit);
         self.bind();
     }
-    /// Alias for `bind`. Binds the texture to its target.
+    /// Same as `bind`: makes this texture current on its cached target.
+    /// Kept for call-site readability (`tex.use()` before a draw).
     /// Parameters:
     ///   - self: Texture to bind.
     ///
@@ -418,10 +469,11 @@ pub const Texture = opaque {
     pub fn use(self: *const Texture) void {
         self.bind();
     }
-    /// Alias for `bindToUnit`. Binds the texture to a specific unit.
+    /// Same as `bindToUnit`: activates `unit` (texture-unit slot) then binds.
+    /// Kept for call-site readability (`tex.useUnit(.texture1)`).
     /// Parameters:
     ///   - self: Texture to bind.
-    ///   - unit: Texture unit to activate.
+    ///   - unit: Texture-unit slot to activate.
     ///
     /// Returns:
     ///   - void.
@@ -429,7 +481,9 @@ pub const Texture = opaque {
         self.bindToUnit(unit);
     }
 
-    /// Queries an integer texture parameter from GL after binding the texture.
+    /// Binds then issues `glGetTexParameteriv`. Use to read driver truth
+    /// (e.g. after external GL code); otherwise prefer zero-cost cached `get*`.
+    /// Units of the result depend on `pname` (enum, texels, or unitless level).
     /// Parameters:
     ///   - self: Texture whose parameter to query.
     ///   - pname: Name of the texture parameter to query.
@@ -442,13 +496,15 @@ pub const Texture = opaque {
         gl.textures.getParameterI(self.implConst().target, pname, @ptrCast(&v));
         return v;
     }
-    /// Queries a float texture parameter from GL after binding the texture.
+    /// Binds then issues `glGetTexParameterfv`. Float twin of `queryParameterI`;
+    /// use for `texture_min/max_lod` (units: LOD levels, float). Cached `get*`
+    /// is cheaper when no external mutation happened.
     /// Parameters:
     ///   - self: Texture whose parameter to query.
     ///   - pname: Name of the texture parameter to query.
     ///
     /// Returns:
-    ///   - Floating point value of the parameter.
+    ///   - Floating point value of the parameter (e.g. LOD in levels).
     pub fn queryParameterF(self: *const Texture, pname: gl.textures.TextureParameter) f32 {
         self.bind();
         var v: f32 = 0;
@@ -456,7 +512,8 @@ pub const Texture = opaque {
         return v;
     }
 
-    /// Creates an `Editor` for deferred texture configuration.
+    /// Opens a deferred batch: `tex.edit().setImage2D(...).setMinFilter(...).apply()`.
+    /// Nothing touches GL until `apply`, so several `set*` calls cost one bind.
     /// Parameters:
     ///   - self: Texture to edit.
     ///
@@ -548,45 +605,48 @@ pub const Texture = opaque {
             pixels: ?*const anyopaque,
         } = null,
         /// Pending 2D sub-image update for `glTexSubImage2D`.
+        /// All offsets/sizes in texels; offsets measured from the lower-left
+        /// origin of `level`. Storage must already exist (see `setStorage2D`).
         _pending_sub2d: ?struct {
             /// Texture target for the sub-image.
             target: gl.textures.TextureTarget,
-            /// Mipmap level to update.
+            /// Mipmap level to update (`0` = base full-size image).
             level: i32,
-            /// X offset within the texture.
+            /// X offset in texels from the left edge.
             xoffset: i32,
-            /// Y offset within the texture.
+            /// Y offset in texels from the bottom edge (lower-left origin).
             yoffset: i32,
-            /// Width of the sub-region.
+            /// Width of the sub-region in texels.
             width: i32,
-            /// Height of the sub-region.
+            /// Height of the sub-region in texels.
             height: i32,
-            /// External pixel format.
+            /// External pixel format of `pixels` (CPU layout, e.g. `.rgba`).
             format: gl.textures.PixelFormat,
-            /// Data type of pixel data.
+            /// Data type of `pixels` (e.g. `.unsigned_byte`).
             kind: gl.enums.DataType,
             /// Pointer to pixel data or null.
             pixels: ?*const anyopaque,
         } = null,
         /// Pending 3D sub-image update for `glTexSubImage3D`.
+        /// Offsets/sizes in texels, origin at lower-left-front of `level`.
         _pending_sub3d: ?struct {
             /// Texture target for the sub-image.
             target: gl.textures.TextureTarget,
             /// Mipmap level to update.
             level: i32,
-            /// X offset within the texture.
+            /// X offset in texels.
             xoffset: i32,
-            /// Y offset within the texture.
+            /// Y offset in texels (lower-left origin).
             yoffset: i32,
-            /// Z offset within the texture.
+            /// Z offset in texels (first slice/layer).
             zoffset: i32,
-            /// Width of the sub-region.
+            /// Width of the sub-region in texels.
             width: i32,
-            /// Height of the sub-region.
+            /// Height of the sub-region in texels.
             height: i32,
-            /// Depth of the sub-region.
+            /// Depth of the sub-region in texels/slices.
             depth: i32,
-            /// External pixel format.
+            /// External pixel format of `pixels`.
             format: gl.textures.PixelFormat,
             /// Data type of pixel data.
             kind: gl.enums.DataType,
@@ -633,87 +693,91 @@ pub const Texture = opaque {
             /// Pointer to compressed data or null.
             data: ?*const anyopaque,
         } = null,
-        /// Pending copy from framebuffer to 2D texture.
+        /// Pending copy from the read framebuffer to a 2D texture (`glCopyTexImage2D`).
+        /// Source `x/y` in window pixels (lower-left origin); dest size redefines
+        /// `level` in texels. Use for screenshots/feedback without CPU roundtrip.
         _pending_copy2d: ?struct {
             /// Texture target for the copy.
             target: gl.textures.TextureTarget,
-            /// Mipmap level.
+            /// Mipmap level to redefine (`0` = base).
             level: i32,
             /// Sized internal format for the new image.
             internalformat: gl.textures.InternalFormat,
-            /// Window X coordinate of the lower-left corner to copy from.
+            /// Source X in window pixels (lower-left origin of read buffer).
             x: i32,
-            /// Window Y coordinate of the lower-left corner to copy from.
+            /// Source Y in window pixels (lower-left origin of read buffer).
             y: i32,
-            /// Width of the region to copy.
+            /// Width of the region in pixels (= texels stored).
             width: i32,
-            /// Height of the region to copy.
+            /// Height of the region in pixels (= texels stored).
             height: i32,
-            /// Border width.
+            /// Border width, must be 0 in core profile.
             border: i32,
         } = null,
-        /// Pending copy from framebuffer to 2D sub-image.
+        /// Pending copy from the read framebuffer into part of a 2D texture.
+        /// Dest offsets in texels (lower-left origin); source in window pixels.
         _pending_copy_sub2d: ?struct {
             /// Texture target for the copy.
             target: gl.textures.TextureTarget,
-            /// Mipmap level.
+            /// Mipmap level to update.
             level: i32,
-            /// X offset within the texture.
+            /// Dest X offset in texels.
             xoffset: i32,
-            /// Y offset within the texture.
+            /// Dest Y offset in texels (lower-left origin).
             yoffset: i32,
-            /// Window X coordinate to copy from.
+            /// Source X in window pixels.
             x: i32,
-            /// Window Y coordinate to copy from.
+            /// Source Y in window pixels.
             y: i32,
-            /// Width of the region.
+            /// Width of the region in pixels/texels.
             width: i32,
-            /// Height of the region.
+            /// Height of the region in pixels/texels.
             height: i32,
         } = null,
-        /// Pending copy from framebuffer to 3D sub-image.
+        /// Pending copy from the read framebuffer into part of a 3D/array texture.
+        /// Dest offsets/sizes in texels; source rect in window pixels.
         _pending_copy_sub3d: ?struct {
             /// Texture target for the copy.
             target: gl.textures.TextureTarget,
-            /// Mipmap level.
+            /// Mipmap level to update.
             level: i32,
-            /// X offset within the texture.
+            /// Dest X offset in texels.
             xoffset: i32,
-            /// Y offset within the texture.
+            /// Dest Y offset in texels.
             yoffset: i32,
-            /// Z offset within the texture.
+            /// Dest Z offset in texels/slices.
             zoffset: i32,
-            /// Window X coordinate to copy from.
+            /// Source X in window pixels.
             x: i32,
-            /// Window Y coordinate to copy from.
+            /// Source Y in window pixels.
             y: i32,
-            /// Width of the region.
+            /// Width of the region in pixels/texels.
             width: i32,
-            /// Height of the region.
+            /// Height of the region in pixels/texels.
             height: i32,
         } = null,
 
-        /// Pending minification filter override.
+        /// Staged min filter; applied as `glTexParameteri` on `apply`.
         _pending_min_filter: ?gl.textures.TextureMinFilter = null,
-        /// Pending magnification filter override.
+        /// Staged mag filter (`.nearest` pixelated vs `.linear` smooth); no mipmaps needed.
         _pending_mag_filter: ?gl.textures.TextureMagFilter = null,
-        /// Pending wrap mode for S coordinate.
+        /// Staged S wrap; governs UV `0-1` outside-range behavior on `apply`.
         _pending_wrap_s: ?gl.textures.TextureWrap = null,
-        /// Pending wrap mode for T coordinate.
+        /// Staged T wrap; governs UV `0-1` outside-range behavior on `apply`.
         _pending_wrap_t: ?gl.textures.TextureWrap = null,
-        /// Pending wrap mode for R coordinate.
+        /// Staged R wrap; only affects 3D/array sampling in UVW `0-1`.
         _pending_wrap_r: ?gl.textures.TextureWrap = null,
-        /// Pending depth comparison mode.
+        /// Staged depth-compare mode (`.none` vs shadow-test); applied on `apply`.
         _pending_compare_mode: ?gl.textures.CompareMode = null,
-        /// Pending depth comparison function.
+        /// Staged depth-compare function used when compare mode is enabled.
         _pending_compare_func: ?gl.textures.CompareFunc = null,
-        /// Pending base mipmap level.
+        /// Staged base mipmap level index (`0` = full-size); applied on `apply`.
         _pending_base_level: ?i32 = null,
-        /// Pending maximum mipmap level.
+        /// Staged max mipmap level index; applied on `apply`.
         _pending_max_level: ?i32 = null,
-        /// Pending minimum LOD value.
+        /// Staged min LOD clamp in float mipmap levels; applied on `apply`.
         _pending_min_lod: ?f32 = null,
-        /// Pending maximum LOD value.
+        /// Staged max LOD clamp in float mipmap levels; applied on `apply`.
         _pending_max_lod: ?f32 = null,
         /// Pending swizzle for red channel.
         _pending_swizzle_r: ?gl.textures.Swizzle = null,
@@ -746,7 +810,8 @@ pub const Texture = opaque {
             param: f32,
         } = null,
 
-        /// Initializes an editor for the given texture.
+        /// Binds an `Editor` to a texture. No GL call and no pending work yet.
+        /// Use as entry point for `edit().set*().apply()` chains.
         /// Parameters:
         ///   - texture: Texture to be edited; stored by reference.
         ///
@@ -756,7 +821,9 @@ pub const Texture = opaque {
             return .{ ._texture = texture };
         }
 
-        /// Queues a texture target change.
+        /// Stages a target switch applied on `apply`. No GL call yet.
+        /// Use when reinterpreting the same id (e.g. `.texture_2d` -> `.texture_2d_array`);
+        /// must agree with the following `setStorage*/setImage*` target.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - target: New texture target to apply.
@@ -767,10 +834,12 @@ pub const Texture = opaque {
             @constCast(self)._pending_target = target;
             return @constCast(self);
         }
-        /// Queues an active texture unit change.
+        /// Stages which texture-unit slot to activate on `apply`. No GL call yet.
+        /// Units: texture-unit slot (`texture0 + N`). Use for multi-sampler materials
+        /// so `glActiveTexture` matches the sampler uniform; cached to `active_unit`.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - unit: Texture unit to activate on `apply`.
+        ///   - unit: Texture-unit slot to activate on `apply`.
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -778,12 +847,17 @@ pub const Texture = opaque {
             @constCast(self)._pending_active_unit = unit;
             return @constCast(self);
         }
-        /// Queues immutable storage allocation for a 2D texture.
+        /// Stages immutable 2D storage (`glTexStorage2D`) for `apply`.
+        /// Allocates all `levels` at once with fixed `internalformat`; contents stay
+        /// undefined until `setSubImage2D` or a CPU upload fills them. Prefer over
+        /// `setImage2D` for render targets and sampled sprites: driver can validate
+        /// completeness up front and storage cannot be accidentally resized.
+        /// Units: `levels` = mipmap count (`1` = no mipmaps); `width/height` in texels.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - target: Texture target.
-        ///   - levels: Number of mipmap levels.
-        ///   - internalformat: Sized internal format.
+        ///   - target: Texture target (e.g. `.texture_2d`).
+        ///   - levels: Number of mipmap levels to allocate.
+        ///   - internalformat: Sized GPU format (e.g. `.rgba8`).
         ///   - width: Width in texels.
         ///   - height: Height in texels.
         ///
@@ -793,7 +867,9 @@ pub const Texture = opaque {
             @constCast(self)._pending_storage2d = .{ .target = target, .levels = levels, .internalformat = internalformat, .width = width, .height = height };
             return @constCast(self);
         }
-        /// Queues immutable storage allocation for a 2D texture using the current or pending target.
+        /// Same as `setStorage2D` but reuses the current or already-staged target.
+        /// Use inside a chain where `setTarget` was called first to avoid repeating it.
+        /// Units: `levels` count; `width/height` in texels.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - levels: Number of mipmap levels.
@@ -807,15 +883,18 @@ pub const Texture = opaque {
             const tgt = @constCast(self)._pending_target orelse @constCast(self)._texture.implConst().target;
             return self.setStorage2D(tgt, levels, internalformat, width, height);
         }
-        /// Queues immutable storage allocation for a 3D texture.
+        /// Stages immutable 3D/array storage (`glTexStorage3D`) for `apply`.
+        /// Use for volume textures or `texture_2d_array` atlases; `depth` is slices
+        /// in texels. Otherwise same rationale as `setStorage2D` vs `setImage3D`.
+        /// Units: `levels` count; `width/height/depth` in texels.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - target: Texture target.
+        ///   - target: Texture target (e.g. `.texture_3d`, `.texture_2d_array`).
         ///   - levels: Number of mipmap levels.
         ///   - internalformat: Sized internal format.
         ///   - width: Width in texels.
         ///   - height: Height in texels.
-        ///   - depth: Depth in texels.
+        ///   - depth: Depth/slices in texels.
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -823,18 +902,25 @@ pub const Texture = opaque {
             @constCast(self)._pending_storage3d = .{ .target = target, .levels = levels, .internalformat = internalformat, .width = width, .height = height, .depth = depth };
             return @constCast(self);
         }
-        /// Queues a 2D image definition via `glTexImage2D`.
+        /// Stages a full 2D image upload (`glTexImage2D`) for `apply`.
+        /// Defines (or redefines) `level` with GPU format `internalformat` and
+        /// optionally uploads CPU `pixels`. Unlike immutable `setStorage2D` this is
+        /// resizable and legacy-friendly — use for loading PNG/JPG data or when
+        /// size changes often. Triggers auto-mipmap on `apply` unless opted out.
+        /// Units: `level` = mipmap index (`0` = base full-size); `width/height` in
+        /// texels; `border` must be `0` in core profile; `format/kind` describe CPU
+        /// layout (e.g. `.rgba`/`.unsigned_byte`); `pixels=null` reserves storage only.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - target: Texture target.
-        ///   - level: Mipmap level.
-        ///   - internalformat: Sized internal format.
+        ///   - level: Mipmap level index (`0` = base).
+        ///   - internalformat: Sized GPU format.
         ///   - width: Width in texels.
         ///   - height: Height in texels.
         ///   - border: Border width (must be 0 in modern GL).
-        ///   - format: External pixel format.
-        ///   - kind: Data type of pixel data.
-        ///   - pixels: Pointer to pixel data or null.
+        ///   - format: External CPU pixel format.
+        ///   - kind: Data type of CPU pixel data.
+        ///   - pixels: Pointer to pixel data or null for uninitialized storage.
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -842,17 +928,22 @@ pub const Texture = opaque {
             @constCast(self)._pending_image2d = .{ .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .border = border, .format = format, .kind = kind, .pixels = pixels };
             return @constCast(self);
         }
-        /// Queues a 3D image definition via `glTexImage3D`.
+        /// Stages a full 3D/array image upload (`glTexImage3D`) for `apply`.
+        /// 3D twin of `setImage2D`: defines `level` with `depth` slices in texels
+        /// and optional CPU data. Use for procedural volumes or array textures when
+        /// immutable storage is not desired.
+        /// Units: `level` mipmap index; `width/height/depth` in texels; `border=0`;
+        /// `format/kind` = CPU layout; `pixels=null` reserves only.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - target: Texture target.
-        ///   - level: Mipmap level.
-        ///   - internalformat: Sized internal format.
+        ///   - level: Mipmap level index.
+        ///   - internalformat: Sized GPU format.
         ///   - width: Width in texels.
         ///   - height: Height in texels.
-        ///   - depth: Depth in texels.
-        ///   - border: Border width.
-        ///   - format: External pixel format.
+        ///   - depth: Depth/slices in texels.
+        ///   - border: Border width (must be 0).
+        ///   - format: External CPU pixel format.
         ///   - kind: Data type of pixel data.
         ///   - pixels: Pointer to pixel data or null.
         ///
@@ -862,18 +953,23 @@ pub const Texture = opaque {
             @constCast(self)._pending_image3d = .{ .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .depth = depth, .border = border, .format = format, .kind = kind, .pixels = pixels };
             return @constCast(self);
         }
-        /// Queues a 2D sub-image update via `glTexSubImage2D`.
+        /// Stages a partial 2D update (`glTexSubImage2D`) for `apply`.
+        /// Replaces a rectangle inside existing storage without reallocating — use
+        /// for streaming video frames, atlas tiles, or dirty-rect updates. Storage
+        /// must already exist via `setStorage2D`/`setImage2D`.
+        /// Units: `level` mipmap index; `xoffset/yoffset` in texels from lower-left
+        /// origin; `width/height` sub-region size in texels; `format/kind` = CPU layout.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - target: Texture target.
         ///   - level: Mipmap level to update.
-        ///   - xoffset: X offset within the texture.
-        ///   - yoffset: Y offset within the texture.
-        ///   - width: Width of the sub-region.
-        ///   - height: Height of the sub-region.
-        ///   - format: External pixel format.
+        ///   - xoffset: X offset in texels from left edge.
+        ///   - yoffset: Y offset in texels from bottom edge.
+        ///   - width: Width of the sub-region in texels.
+        ///   - height: Height of the sub-region in texels.
+        ///   - format: External CPU pixel format.
         ///   - kind: Data type of pixel data.
-        ///   - pixels: Pointer to pixel data or null.
+        ///   - pixels: Pointer to pixel data.
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -881,20 +977,24 @@ pub const Texture = opaque {
             @constCast(self)._pending_sub2d = .{ .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .width = width, .height = height, .format = format, .kind = kind, .pixels = pixels };
             return @constCast(self);
         }
-        /// Queues a 3D sub-image update via `glTexSubImage3D`.
+        /// Stages a partial 3D/array update (`glTexSubImage3D`) for `apply`.
+        /// 3D twin of `setSubImage2D`: updates a box inside existing storage.
+        /// Use for volume bricks or single array layers.
+        /// Units: `level` index; `xoffset/yoffset/zoffset` in texels from
+        /// lower-left-front origin; `width/height/depth` sub-box in texels.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - target: Texture target.
         ///   - level: Mipmap level to update.
-        ///   - xoffset: X offset.
-        ///   - yoffset: Y offset.
-        ///   - zoffset: Z offset.
-        ///   - width: Width of the sub-region.
-        ///   - height: Height of the sub-region.
-        ///   - depth: Depth of the sub-region.
+        ///   - xoffset: X offset in texels.
+        ///   - yoffset: Y offset in texels.
+        ///   - zoffset: Z offset in texels/slices.
+        ///   - width: Width of the sub-region in texels.
+        ///   - height: Height of the sub-region in texels.
+        ///   - depth: Depth of the sub-region in texels.
         ///   - format: External pixel format.
         ///   - kind: Data type of pixel data.
-        ///   - pixels: Pointer to pixel data or null.
+        ///   - pixels: Pointer to pixel data.
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -902,15 +1002,19 @@ pub const Texture = opaque {
             @constCast(self)._pending_sub3d = .{ .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .format = format, .kind = kind, .pixels = pixels };
             return @constCast(self);
         }
-        /// Queues a compressed 2D image via `glCompressedTexImage2D`.
+        /// Stages a GPU-compressed 2D upload (`glCompressedTexImage2D`) for `apply`.
+        /// Use for S3TC/ETC/ASTC assets to save VRAM and bandwidth; `data` must
+        /// already be encoded, `image_size` is its exact byte length (not texels).
+        /// Units: `level` mipmap index; `width/height` in texels; `border=0`;
+        /// `image_size` in bytes.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - target: Texture target.
-        ///   - level: Mipmap level.
-        ///   - internalformat: Compressed internal format.
+        ///   - level: Mipmap level index.
+        ///   - internalformat: Compressed GPU format.
         ///   - width: Width in texels.
         ///   - height: Height in texels.
-        ///   - border: Border width.
+        ///   - border: Border width (must be 0).
         ///   - image_size: Size of compressed data in bytes.
         ///   - data: Pointer to compressed data or null.
         ///
@@ -920,16 +1024,18 @@ pub const Texture = opaque {
             @constCast(self)._pending_compressed2d = .{ .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .border = border, .image_size = image_size, .data = data };
             return @constCast(self);
         }
-        /// Queues a compressed 3D image via `glCompressedTexImage3D`.
+        /// Stages a GPU-compressed 3D/array upload (`glCompressedTexImage3D`) for `apply`.
+        /// 3D twin of `setCompressedImage2D` for compressed volumes/arrays.
+        /// Units: `level` index; `width/height/depth` in texels; `image_size` in bytes.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - target: Texture target.
-        ///   - level: Mipmap level.
-        ///   - internalformat: Compressed internal format.
+        ///   - level: Mipmap level index.
+        ///   - internalformat: Compressed GPU format.
         ///   - width: Width in texels.
         ///   - height: Height in texels.
         ///   - depth: Depth in texels.
-        ///   - border: Border width.
+        ///   - border: Border width (must be 0).
         ///   - image_size: Size of compressed data in bytes.
         ///   - data: Pointer to compressed data or null.
         ///
@@ -939,17 +1045,22 @@ pub const Texture = opaque {
             @constCast(self)._pending_compressed3d = .{ .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .depth = depth, .border = border, .image_size = image_size, .data = data };
             return @constCast(self);
         }
-        /// Queues a framebuffer copy to a 2D texture via `glCopyTexImage2D`.
+        /// Stages a GPU-side copy from the read framebuffer (`glCopyTexImage2D`).
+        /// Redefines `level` from screen contents — use for screenshots, mirrors,
+        /// or feedback effects without CPU readback. Source rect is in the read buffer.
+        /// Units: `level` mipmap index; `x/y` source origin in window pixels
+        /// (lower-left origin); `width/height` region in pixels (= texels stored);
+        /// `border=0`.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - target: Texture target.
-        ///   - level: Mipmap level.
-        ///   - internalformat: Sized internal format for the new image.
-        ///   - x: Window X coordinate of the lower-left corner to copy from.
-        ///   - y: Window Y coordinate of the lower-left corner to copy from.
-        ///   - width: Width of the region to copy.
-        ///   - height: Height of the region to copy.
-        ///   - border: Border width.
+        ///   - level: Mipmap level to redefine.
+        ///   - internalformat: Sized GPU format for the new image.
+        ///   - x: Source X in window pixels (lower-left origin).
+        ///   - y: Source Y in window pixels (lower-left origin).
+        ///   - width: Width of the region in pixels/texels.
+        ///   - height: Height of the region in pixels/texels.
+        ///   - border: Border width (must be 0).
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -957,17 +1068,21 @@ pub const Texture = opaque {
             @constCast(self)._pending_copy2d = .{ .target = target, .level = level, .internalformat = internalformat, .x = x, .y = y, .width = width, .height = height, .border = border };
             return @constCast(self);
         }
-        /// Queues a framebuffer copy to a 2D sub-image via `glCopyTexSubImage2D`.
+        /// Stages a GPU-side copy into part of a 2D texture (`glCopyTexSubImage2D`).
+        /// Like `setCopyImage2D` but preserves existing storage and only overwrites
+        /// a rectangle — use for incremental screen capture or live thumbnails.
+        /// Units: `level` index; dest `xoffset/yoffset` in texels (lower-left origin);
+        /// source `x/y` in window pixels; `width/height` in pixels/texels.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - target: Texture target.
-        ///   - level: Mipmap level.
-        ///   - xoffset: X offset within the texture.
-        ///   - yoffset: Y offset within the texture.
-        ///   - x: Window X coordinate to copy from.
-        ///   - y: Window Y coordinate to copy from.
-        ///   - width: Width of the region.
-        ///   - height: Height of the region.
+        ///   - level: Mipmap level to update.
+        ///   - xoffset: Dest X offset in texels.
+        ///   - yoffset: Dest Y offset in texels.
+        ///   - x: Source X in window pixels.
+        ///   - y: Source Y in window pixels.
+        ///   - width: Width of the region in pixels/texels.
+        ///   - height: Height of the region in pixels/texels.
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -975,18 +1090,20 @@ pub const Texture = opaque {
             @constCast(self)._pending_copy_sub2d = .{ .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .x = x, .y = y, .width = width, .height = height };
             return @constCast(self);
         }
-        /// Queues a framebuffer copy to a 3D sub-image via `glCopyTexSubImage3D`.
+        /// Stages a GPU-side copy into part of a 3D/array texture (`glCopyTexSubImage3D`).
+        /// 3D twin of `setCopySubImage2D`: routes a 2D screen rect into one slice/box.
+        /// Units: dest offsets in texels, source rect in window pixels, sizes in both.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - target: Texture target.
-        ///   - level: Mipmap level.
-        ///   - xoffset: X offset within the texture.
-        ///   - yoffset: Y offset within the texture.
-        ///   - zoffset: Z offset within the texture.
-        ///   - x: Window X coordinate to copy from.
-        ///   - y: Window Y coordinate to copy from.
-        ///   - width: Width of the region.
-        ///   - height: Height of the region.
+        ///   - level: Mipmap level to update.
+        ///   - xoffset: Dest X offset in texels.
+        ///   - yoffset: Dest Y offset in texels.
+        ///   - zoffset: Dest Z offset in texels/slices.
+        ///   - x: Source X in window pixels.
+        ///   - y: Source Y in window pixels.
+        ///   - width: Width of the region in pixels/texels.
+        ///   - height: Height of the region in pixels/texels.
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -994,10 +1111,13 @@ pub const Texture = opaque {
             @constCast(self)._pending_copy_sub3d = .{ .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .x = x, .y = y, .width = width, .height = height };
             return @constCast(self);
         }
-        /// Queues a minification filter change.
+        /// Stages a min-filter switch applied on `apply`. No GL call yet.
+        /// Picks sampling when minified (one texel < one pixel): `.nearest`/`.linear`
+        /// need no mipmaps and keep the texture complete; `*_mipmap_*` need generated
+        /// mipmaps or sampling returns black. Pair with `setGenerateMipmap`.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - filter: New minification filter.
+        ///   - filter: Min filter (e.g. `.linear_mipmap_linear` for trilinear).
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1005,10 +1125,12 @@ pub const Texture = opaque {
             @constCast(self)._pending_min_filter = filter;
             return @constCast(self);
         }
-        /// Queues a magnification filter change.
+        /// Stages a mag-filter switch applied on `apply`. No GL call yet.
+        /// Picks point (`.nearest`, pixelated) vs bilinear (`.linear`, smooth) when
+        /// magnified (one texel > one pixel). Never needs mipmaps, unlike min filter.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - filter: New magnification filter.
+        ///   - filter: Mag filter (`.nearest` or `.linear`).
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1016,10 +1138,13 @@ pub const Texture = opaque {
             @constCast(self)._pending_mag_filter = filter;
             return @constCast(self);
         }
-        /// Queues a wrap mode change for S coordinate.
+        /// Stages an S (U-axis) wrap switch applied on `apply`. No GL call yet.
+        /// Units: governs normalized UV `0-1`; `.repeat` tiles ground/sprites,
+        /// `.clamp_to_edge` stretches edge texels for UI/atlases (avoids bleeding),
+        /// `.mirrored_repeat` mirrors tiling. Ignored when UV stays inside `0-1`.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - wrap: New wrap mode for S.
+        ///   - wrap: New wrap mode for S (U in `0-1` UV space).
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1027,10 +1152,11 @@ pub const Texture = opaque {
             @constCast(self)._pending_wrap_s = wrap;
             return @constCast(self);
         }
-        /// Queues a wrap mode change for T coordinate.
+        /// Stages a T (V-axis) wrap switch applied on `apply`. No GL call yet.
+        /// Units: normalized UV `0-1`. See `setWrapS`; set both via `setWrap` for 2D.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - wrap: New wrap mode for T.
+        ///   - wrap: New wrap mode for T (V in `0-1` UV space).
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1038,10 +1164,11 @@ pub const Texture = opaque {
             @constCast(self)._pending_wrap_t = wrap;
             return @constCast(self);
         }
-        /// Queues a wrap mode change for R coordinate.
+        /// Stages an R (W-axis) wrap switch applied on `apply`. No GL call yet.
+        /// Units: normalized depth UV `0-1`. Only matters for 3D/array sampling.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - wrap: New wrap mode for R.
+        ///   - wrap: New wrap mode for R (W in `0-1` UV space).
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1049,11 +1176,13 @@ pub const Texture = opaque {
             @constCast(self)._pending_wrap_r = wrap;
             return @constCast(self);
         }
-        /// Queues wrap mode changes for S and T coordinates.
+        /// Stages S+T wrap switches together. No GL call yet.
+        /// Units: both in normalized UV `0-1`. Convenience for 2D sprites/tiles so
+        /// both axes tile or clamp consistently; use `setWrapSTR` to include R.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - s: Wrap mode for S.
-        ///   - t: Wrap mode for T.
+        ///   - s: Wrap mode for S (U `0-1`).
+        ///   - t: Wrap mode for T (V `0-1`).
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1062,7 +1191,9 @@ pub const Texture = opaque {
             @constCast(self)._pending_wrap_t = t;
             return @constCast(self);
         }
-        /// Queues wrap mode changes for S, T and R coordinates.
+        /// Stages S+T+R wrap switches together. No GL call yet.
+        /// Units: normalized UVW `0-1` each. Use for volumes/arrays where W must
+        /// also tile or clamp; overkill for plain 2D (prefer `setWrap`).
         /// Parameters:
         ///   - self: Editor instance.
         ///   - s: Wrap mode for S.
@@ -1077,7 +1208,10 @@ pub const Texture = opaque {
             @constCast(self)._pending_wrap_r = r;
             return @constCast(self);
         }
-        /// Queues a depth comparison mode change.
+        /// Stages a depth-compare mode switch applied on `apply`. No GL call yet.
+        /// Use `.compare_ref_to_texture` for shadow-map depth textures so sampling
+        /// returns a `0-1` visibility factor instead of raw depth; keep `.none`
+        /// for color textures or depth visualization.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - mode: New comparison mode.
@@ -1088,10 +1222,12 @@ pub const Texture = opaque {
             @constCast(self)._pending_compare_mode = mode;
             return @constCast(self);
         }
-        /// Queues a depth comparison function change.
+        /// Stages a depth-compare function applied on `apply`. No GL call yet.
+        /// Picks shadow pass/fail rule (e.g. `.lequal`: fragment closer-or-equal to
+        /// stored depth is lit). Ignored unless compare mode is enabled.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - func: New comparison function.
+        ///   - func: New comparison function (e.g. `.lequal`).
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1099,10 +1235,12 @@ pub const Texture = opaque {
             @constCast(self)._pending_compare_func = func;
             return @constCast(self);
         }
-        /// Queues a base level change.
+        /// Stages a base-level clamp applied on `apply`. No GL call yet.
+        /// Units: mipmap index (`0` = full-size). Raise to skip the largest levels
+        /// for streaming or perf; must stay `<= max_level`.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - level: New base level.
+        ///   - level: New base level index.
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1110,10 +1248,12 @@ pub const Texture = opaque {
             @constCast(self)._pending_base_level = level;
             return @constCast(self);
         }
-        /// Queues a maximum level change.
+        /// Stages a max-level clamp applied on `apply`. No GL call yet.
+        /// Units: mipmap index. Lower to force blurrier/smaller levels (e.g. for
+        /// distance fade); must stay `>= base_level`.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - level: New maximum level.
+        ///   - level: New maximum level index.
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1121,10 +1261,12 @@ pub const Texture = opaque {
             @constCast(self)._pending_max_level = level;
             return @constCast(self);
         }
-        /// Queues a minimum LOD change.
+        /// Stages a min-LOD clamp applied on `apply`. No GL call yet.
+        /// Units: float LOD in mipmap levels (unitless, `0` = sharpest). Finer than
+        /// integer `setBaseLevel`; use for LOD bias or smooth transitions.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - lod: New minimum LOD.
+        ///   - lod: New minimum LOD in levels.
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1132,10 +1274,11 @@ pub const Texture = opaque {
             @constCast(self)._pending_min_lod = lod;
             return @constCast(self);
         }
-        /// Queues a maximum LOD change.
+        /// Stages a max-LOD clamp applied on `apply`. No GL call yet.
+        /// Units: float LOD in levels. Use to cap how blurry sampling may get.
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - lod: New maximum LOD.
+        ///   - lod: New maximum LOD in levels.
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1143,7 +1286,9 @@ pub const Texture = opaque {
             @constCast(self)._pending_max_lod = lod;
             return @constCast(self);
         }
-        /// Queues a swizzle change for the red channel.
+        /// Stages a red-channel swizzle applied on `apply`. No GL call yet.
+        /// Remaps what shader `.r` reads (e.g. force `.one` for opaque, `.red` to
+        /// replicate luminance) without re-uploading texels. Use for format fixups.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - swizzle: New swizzle value for red.
@@ -1154,7 +1299,8 @@ pub const Texture = opaque {
             @constCast(self)._pending_swizzle_r = swizzle;
             return @constCast(self);
         }
-        /// Queues a swizzle change for the green channel.
+        /// Stages a green-channel swizzle applied on `apply`. No GL call yet.
+        /// See `setSwizzleR`.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - swizzle: New swizzle value for green.
@@ -1165,7 +1311,8 @@ pub const Texture = opaque {
             @constCast(self)._pending_swizzle_g = swizzle;
             return @constCast(self);
         }
-        /// Queues a swizzle change for the blue channel.
+        /// Stages a blue-channel swizzle applied on `apply`. No GL call yet.
+        /// See `setSwizzleR`.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - swizzle: New swizzle value for blue.
@@ -1176,7 +1323,8 @@ pub const Texture = opaque {
             @constCast(self)._pending_swizzle_b = swizzle;
             return @constCast(self);
         }
-        /// Queues a swizzle change for the alpha channel.
+        /// Stages an alpha-channel swizzle applied on `apply`. No GL call yet.
+        /// See `setSwizzleR`; commonly forced to `.one` when source has no alpha.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - swizzle: New swizzle value for alpha.
@@ -1187,7 +1335,8 @@ pub const Texture = opaque {
             @constCast(self)._pending_swizzle_a = swizzle;
             return @constCast(self);
         }
-        /// Queues swizzle changes for all four channels.
+        /// Stages all four channel swizzles at once. No GL call yet.
+        /// Use to repack formats in one chain (e.g. `RRR1` luminance, `BGRA` fix).
         /// Parameters:
         ///   - self: Editor instance.
         ///   - r: Swizzle for red channel.
@@ -1205,6 +1354,10 @@ pub const Texture = opaque {
             return @constCast(self);
         }
         /// Overrides the default auto mipmap behavior for next `apply`.
+        /// By default any content upload (`setImage*/setStorage*/setSubImage*`,
+        /// compressed, copy) auto-generates the mipmap chain so mipmap min filters
+        /// stay complete; param-only edits never trigger it. Pass `false` to keep
+        /// a single level (then use a non-mipmap min filter) or `true` to force.
         /// Parameters:
         ///   - self: Editor instance.
         ///   - gen: True to force generation, false to disable it even when
@@ -1216,10 +1369,13 @@ pub const Texture = opaque {
             @constCast(self)._pending_generate_mipmap = gen;
             return @constCast(self);
         }
-        /// Queues a generic integer texture parameter.
+        /// Stages a raw integer texture parameter (`glTexParameteri`) for `apply`.
+        /// Escape hatch for enums this wrapper does not model; prefer typed
+        /// `setMinFilter`/`setWrap*` etc when available so the CPU cache stays synced
+        /// (this path does not update cached fields).
         /// Parameters:
         ///   - self: Editor instance.
-        ///   - pname: Parameter name.
+        ///   - pname: Parameter name (unit depends on pname: enum, texels, or level).
         ///   - param: Integer value to set.
         ///
         /// Returns:
@@ -1228,11 +1384,14 @@ pub const Texture = opaque {
             @constCast(self)._pending_param_i = .{ .pname = pname, .param = param };
             return @constCast(self);
         }
-        /// Queues a generic float texture parameter.
+        /// Stages a raw float texture parameter (`glTexParameterf`) for `apply`.
+        /// Escape hatch twin of `setParameterI`; use for float params like LOD clamps
+        /// when the typed setter is insufficient. Units depend on `pname`
+        /// (e.g. LOD in levels).
         /// Parameters:
         ///   - self: Editor instance.
         ///   - pname: Parameter name.
-        ///   - param: Floating point value to set.
+        ///   - param: Floating point value to set (e.g. LOD in levels).
         ///
         /// Returns:
         ///   - Pointer to the editor for chaining.
@@ -1241,10 +1400,12 @@ pub const Texture = opaque {
             return @constCast(self);
         }
 
-        /// Applies all queued changes to the GL texture object.
-        /// Binds the texture, executes any pending storage, image, sub-image, compressed
-        /// and copy operations, updates filtering, wrapping, comparison, LOD, swizzle
-        /// and generic parameters, generates mipmaps if requested, and resets the editor.
+        /// Flushes the staged batch to GL in one bind. Activates the staged unit,
+        /// allocates/uploads staged storage/image/sub-image/compressed/copy content
+        /// (sizes in texels, copy sources in window pixels), applies staged sampler
+        /// state (filters, UV `0-1` wraps, compare, level/LOD, swizzle), auto-generates
+        /// mipmaps when content was uploaded unless opted out, syncs the CPU cache,
+        /// and resets the editor for reuse. Call once per `edit()` chain.
         /// Parameters:
         ///   - self: Editor instance holding pending changes.
         ///

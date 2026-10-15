@@ -51,7 +51,9 @@ pub const Renderbuffer = opaque {
         return @ptrCast(@alignCast(self));
     }
 
-    /// Creates a new renderbuffer object.
+    /// Generates GL renderbuffer via glGenRenderbuffers and seeds fresh cached Impl state.
+    /// Use an RBO (non-samplable, fast for depth/stencil/MSAA) vs a texture when you only
+    /// need a framebuffer attachment and never sample it in a shader; stub id=1 when GL unloaded.
     /// Parameters:
     /// - allocator: allocator used to allocate Impl storage.
     ///
@@ -68,7 +70,8 @@ pub const Renderbuffer = opaque {
         m.id = id;
         return @ptrCast(m);
     }
-    /// Destroys the renderbuffer and frees Impl storage.
+    /// Deletes GL object via glDeleteRenderbuffers (if loaded and id != 0) and frees cached Impl storage.
+    /// Call once to avoid GPU and allocator leaks; the handle dangles after free so never reuse it.
     /// Parameters:
     /// - self: renderbuffer to destroy.
     /// - allocator: allocator that was used for creation.
@@ -79,7 +82,8 @@ pub const Renderbuffer = opaque {
         if (gl.loader.loaded() and m.id != 0) gl.renderbuffers.delete(1, @ptrCast(&m.id));
         allocator.destroy(m);
     }
-    /// Checks whether the underlying OpenGL renderbuffer object is valid.
+    /// Checks cached Impl.id (!= 0) plus glIsRenderbuffer without mutating GL or cached Impl state.
+    /// Use to validate before attach/bind after context loss; cached id alone may be stale.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -89,7 +93,8 @@ pub const Renderbuffer = opaque {
         return m.id != 0 and gl.renderbuffers.isRenderbuffer(m.id);
     }
 
-    /// Returns the OpenGL identifier for this renderbuffer.
+    /// Reads cached Impl.id without any GL call; id was created by glGenRenderbuffers in create.
+    /// Use for framebuffer attachment; contrast query* which round-trip to GL for driver truth.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -97,7 +102,8 @@ pub const Renderbuffer = opaque {
     pub fn getId(self: *const Renderbuffer) u32 {
         return self.implConst().id;
     }
-    /// Returns the current binding target.
+    /// Reads cached Impl.target without any GL call; tracks the last applied bind point.
+    /// Use to reason about where bind() binds; use bindTo for a one-off explicit target without mutating cache.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -105,7 +111,8 @@ pub const Renderbuffer = opaque {
     pub fn getTarget(self: *const Renderbuffer) RenderbufferTarget {
         return self.implConst().target;
     }
-    /// Returns the cached internal format, if storage was allocated.
+    /// Reads cached Impl.internal_format (sized internal format enum) without any GL call.
+    /// Null means Editor.apply never allocated storage; contrast queryInternalFormat which re-reads driver truth.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -113,7 +120,8 @@ pub const Renderbuffer = opaque {
     pub fn getInternalFormat(self: *const Renderbuffer) ?InternalFormat {
         return self.implConst().internal_format;
     }
-    /// Returns the cached width.
+    /// Reads cached Impl.width in pixels without any GL call; last value written by Editor.apply.
+    /// Why cached: zero-cost layout without a GL round-trip; contrast queryWidth (pixels from GL) for verification.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -121,7 +129,8 @@ pub const Renderbuffer = opaque {
     pub fn getWidth(self: *const Renderbuffer) i32 {
         return self.implConst().width;
     }
-    /// Returns the cached height.
+    /// Reads cached Impl.height in pixels without any GL call; last value written by Editor.apply.
+    /// Why cached: zero-cost layout without a GL round-trip; contrast queryHeight (pixels from GL) for verification.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -129,7 +138,8 @@ pub const Renderbuffer = opaque {
     pub fn getHeight(self: *const Renderbuffer) i32 {
         return self.implConst().height;
     }
-    /// Returns the cached sample count.
+    /// Reads cached Impl.samples as sample count without any GL call (0=single-sample, e.g. 4=MSAAx4).
+    /// Clamp future MSAA allocations against maxSamples() (GL_MAX_SAMPLES limit); contrast querySamples for driver truth.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -137,16 +147,18 @@ pub const Renderbuffer = opaque {
     pub fn getSamples(self: *const Renderbuffer) i32 {
         return self.implConst().samples;
     }
-    /// Returns the cached storage size.
+    /// Reads cached Impl.width/height in pixels without any GL call; last values written by Editor.apply.
+    /// Why cached: fast framebuffer sizing; contrast queryWidth/queryHeight (pixels from GL) when verification is needed.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
-    /// Returns: anonymous struct with fields `w` and `h`.
+    /// Returns: anonymous struct with fields `w` and `h` in pixels.
     pub fn getSize(self: *const Renderbuffer) struct { w: i32, h: i32 } {
         const m = self.implConst();
         return .{ .w = m.width, .h = m.height };
     }
-    /// Returns true when the cached storage is multisampled.
+    /// Derives cached Impl.samples > 0 without any GL call; leaves GL and cached Impl unmutated.
+    /// When true, plan an MSAA resolve via Framebuffer.blitFrom since RBOs are non-samplable (unlike textures).
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -155,7 +167,8 @@ pub const Renderbuffer = opaque {
         return self.implConst().samples > 0;
     }
 
-    /// Binds this renderbuffer to its stored target.
+    /// Calls glBindRenderbuffer with cached id/target without mutating cached Impl state.
+    /// Use before manual queryParameter calls; Editor.apply binds internally so explicit bind is rarely needed otherwise.
     /// Parameters:
     /// - self: renderbuffer to bind.
     ///
@@ -164,7 +177,8 @@ pub const Renderbuffer = opaque {
         const m = self.implConst();
         gl.renderbuffers.bind(m.target, m.id);
     }
-    /// Binds this renderbuffer to an explicit target.
+    /// Calls glBindRenderbuffer with cached id plus an explicit target without mutating cached Impl.target.
+    /// Use for a one-off bind elsewhere; use Editor.setTarget plus apply to persist a target change in cache.
     /// Parameters:
     /// - self: renderbuffer to bind.
     /// - target: renderbuffer target to bind to.
@@ -173,7 +187,8 @@ pub const Renderbuffer = opaque {
     pub fn bindTo(self: *const Renderbuffer, target: RenderbufferTarget) void {
         gl.renderbuffers.bind(target, self.implConst().id);
     }
-    /// Binds this renderbuffer for use as current renderbuffer.
+    /// Calls glBindRenderbuffer via bind() with cached id/target without mutating cached Impl state.
+    /// Ergonomic alias for making this RBO current; identical cost and semantics to bind().
     /// Parameters:
     /// - self: renderbuffer to use.
     ///
@@ -182,19 +197,21 @@ pub const Renderbuffer = opaque {
         self.bind();
     }
 
-    /// Queries a renderbuffer parameter from GL after binding.
+    /// Binds RBO then reads driver state via glGetRenderbufferParameteriv without mutating cached Impl.
+    /// Why vs cached get*: ground truth after external GL changes but slower round-trip, so prefer get* on hot paths.
     /// Parameters:
     /// - self: renderbuffer to query.
-    /// - pname: parameter name to query.
+    /// - pname: parameter name to query (units of Returns vary: pixels for WIDTH/HEIGHT, sample count for SAMPLES, bits per channel for RED/GREEN/BLUE/ALPHA/DEPTH/STENCIL sizes, internal format enum value for INTERNAL_FORMAT).
     ///
-    /// Returns: integer value of the parameter.
+    /// Returns: integer value of the parameter in pname-specific units.
     pub fn queryParameter(self: *const Renderbuffer, pname: RenderbufferParameter) i32 {
         self.bind();
         var v: i32 = 0;
         gl.renderbuffers.getParameter(self.implConst().target, pname, @ptrCast(&v));
         return v;
     }
-    /// Queries the storage width from GL.
+    /// Binds then queries GL RENDERBUFFER_WIDTH without mutating cached Impl; returns pixels.
+    /// Why vs cached getWidth (pixels, zero-cost): verifies driver truth after external or resized storage.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -202,7 +219,8 @@ pub const Renderbuffer = opaque {
     pub fn queryWidth(self: *const Renderbuffer) i32 {
         return self.queryParameter(.renderbuffer_width);
     }
-    /// Queries the storage height from GL.
+    /// Binds then queries GL RENDERBUFFER_HEIGHT without mutating cached Impl; returns pixels.
+    /// Why vs cached getHeight (pixels, zero-cost): verifies driver truth after external or resized storage.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -210,7 +228,9 @@ pub const Renderbuffer = opaque {
     pub fn queryHeight(self: *const Renderbuffer) i32 {
         return self.queryParameter(.renderbuffer_height);
     }
-    /// Queries the sample count from GL.
+    /// Binds then queries GL RENDERBUFFER_SAMPLES without mutating cached Impl; returns sample count.
+    /// Units are sample count (0=single-sample, e.g. 4=MSAAx4, capped by GL_MAX_SAMPLES from maxSamples()).
+    /// Contrast cached getSamples for the fast zero-cost path.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -218,7 +238,8 @@ pub const Renderbuffer = opaque {
     pub fn querySamples(self: *const Renderbuffer) i32 {
         return self.queryParameter(.renderbuffer_samples);
     }
-    /// Queries the internal format from GL.
+    /// Binds then queries GL RENDERBUFFER_INTERNAL_FORMAT without mutating cached Impl; returns internal format enum.
+    /// Why vs cached getInternalFormat: confirms the sized internal format enum actually allocated by the driver.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -226,7 +247,8 @@ pub const Renderbuffer = opaque {
     pub fn queryInternalFormat(self: *const Renderbuffer) InternalFormat {
         return @enumFromInt(@as(u32, @intCast(self.queryParameter(.renderbuffer_internal_format))));
     }
-    /// Queries the red component resolution from GL.
+    /// Binds then queries GL RENDERBUFFER_RED_SIZE without mutating cached Impl; returns bits per channel, not pixels.
+    /// Why: validates actual red precision of the sized internal format enum; contrast queryWidth/queryHeight which return pixels.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -234,7 +256,8 @@ pub const Renderbuffer = opaque {
     pub fn queryRedSize(self: *const Renderbuffer) i32 {
         return self.queryParameter(.renderbuffer_red_size);
     }
-    /// Queries the green component resolution from GL.
+    /// Binds then queries GL RENDERBUFFER_GREEN_SIZE without mutating cached Impl; returns bits per channel, not pixels.
+    /// Why: validates actual green precision of the sized internal format enum; contrast queryWidth/queryHeight which return pixels.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -242,7 +265,8 @@ pub const Renderbuffer = opaque {
     pub fn queryGreenSize(self: *const Renderbuffer) i32 {
         return self.queryParameter(.renderbuffer_green_size);
     }
-    /// Queries the blue component resolution from GL.
+    /// Binds then queries GL RENDERBUFFER_BLUE_SIZE without mutating cached Impl; returns bits per channel, not pixels.
+    /// Why: validates actual blue precision of the sized internal format enum; contrast queryWidth/queryHeight which return pixels.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -250,7 +274,8 @@ pub const Renderbuffer = opaque {
     pub fn queryBlueSize(self: *const Renderbuffer) i32 {
         return self.queryParameter(.renderbuffer_blue_size);
     }
-    /// Queries the alpha component resolution from GL.
+    /// Binds then queries GL RENDERBUFFER_ALPHA_SIZE without mutating cached Impl; returns bits per channel, not pixels.
+    /// Why: validates actual alpha precision of the sized internal format enum; contrast queryWidth/queryHeight which return pixels.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -258,7 +283,8 @@ pub const Renderbuffer = opaque {
     pub fn queryAlphaSize(self: *const Renderbuffer) i32 {
         return self.queryParameter(.renderbuffer_alpha_size);
     }
-    /// Queries the depth component resolution from GL.
+    /// Binds then queries GL RENDERBUFFER_DEPTH_SIZE without mutating cached Impl; returns bits per channel, not pixels.
+    /// Why: validates actual depth precision (RBOs are the fast non-samplable path for depth vs textures); contrast pixel-sized queries.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -266,7 +292,8 @@ pub const Renderbuffer = opaque {
     pub fn queryDepthSize(self: *const Renderbuffer) i32 {
         return self.queryParameter(.renderbuffer_depth_size);
     }
-    /// Queries the stencil component resolution from GL.
+    /// Binds then queries GL RENDERBUFFER_STENCIL_SIZE without mutating cached Impl; returns bits per channel, not pixels.
+    /// Why: validates actual stencil precision (RBOs are the fast non-samplable path for stencil vs textures); contrast pixel-sized queries.
     /// Parameters:
     /// - self: renderbuffer to query.
     ///
@@ -275,7 +302,8 @@ pub const Renderbuffer = opaque {
         return self.queryParameter(.renderbuffer_stencil_size);
     }
 
-    /// Returns the maximum supported sample count (`GL_MAX_SAMPLES`).
+    /// Reads GL_MAX_SAMPLES via glGetIntegerv without touching any cached Impl state; changes no GL state.
+    /// Why: clamp setStorageMultisample samples (sample count, e.g. 4=MSAAx4) to this limit to avoid GL errors.
     /// Parameters: none.
     ///
     /// Returns: maximum samples per pixel, or 0 when GL is not loaded.
@@ -286,7 +314,8 @@ pub const Renderbuffer = opaque {
         return v;
     }
 
-    /// Returns an editor for batched renderbuffer mutation.
+    /// Creates an Editor bound to self without any GL call or cached Impl mutation; defers work to apply.
+    /// Why builder: batches target plus storage into one bind in apply; multisample pending wins if both queued.
     /// Parameters:
     /// - self: renderbuffer to edit.
     ///
@@ -297,17 +326,18 @@ pub const Renderbuffer = opaque {
 
     /// Builder for deferred renderbuffer state changes.
     pub const Editor = struct {
-        /// Reference to the renderbuffer being edited.
+        /// Target RBO whose cached Impl is only mutated by apply; holding it has no GL effect on its own.
         _rb: *Renderbuffer,
-        /// Pending target change if any.
+        /// Queued target enum change (null keeps cached Impl.target); persisted to cache by apply.
         _pending_target: ?RenderbufferTarget = null,
-        /// Pending plain storage allocation.
+        /// Queued plain single-sample storage: internalformat is sized internal format enum, width/height in pixels.
         _pending_storage: ?struct { internalformat: InternalFormat, width: i32, height: i32 } = null,
-        /// Pending multisampled storage allocation. Wins over plain
-        /// storage when both are queued in the same batch.
+        /// Queued multisample storage: samples is sample count (e.g. 4=MSAAx4, capped by GL_MAX_SAMPLES), width/height in pixels, internalformat is sized internal format enum.
+        /// Wins over plain storage when both are queued in the same batch; resolve via Framebuffer.blitFrom since RBOs are non-samplable.
         _pending_storage_multisample: ?struct { samples: i32, internalformat: InternalFormat, width: i32, height: i32 } = null,
 
-        /// Creates an editor bound to a renderbuffer.
+        /// Creates an Editor bound to rb without any GL call or cached Impl mutation; starts with empty pending queue.
+        /// Beginning of the builder chain; follow with setStorage or setStorageMultisample then apply to allocate.
         /// Parameters:
         /// - rb: renderbuffer to edit.
         ///
@@ -315,7 +345,8 @@ pub const Renderbuffer = opaque {
         pub fn init(rb: *Renderbuffer) Editor {
             return .{ ._rb = rb };
         }
-        /// Queues a target change.
+        /// Queues a pending target enum change without any GL call or cached Impl mutation until apply.
+        /// Why vs bindTo (temporary bind without cache update): persists as cached Impl.target in apply for future bind() calls.
         /// Parameters:
         /// - self: editor instance.
         /// - target: new renderbuffer target.
@@ -325,10 +356,11 @@ pub const Renderbuffer = opaque {
             @constCast(self)._pending_target = target;
             return @constCast(self);
         }
-        /// Queues a plain storage allocation via `glRenderbufferStorage`.
+        /// Queues plain single-sample storage (glRenderbufferStorage semantics) without GL or cache mutation until apply.
+        /// Use an RBO (non-samplable, fast) vs a texture when the attachment is never sampled; multisample pending wins if both queued.
         /// Parameters:
         /// - self: editor instance.
-        /// - internalformat: sized internal format.
+        /// - internalformat: sized internal format enum.
         /// - width: width in pixels.
         /// - height: height in pixels.
         ///
@@ -337,11 +369,12 @@ pub const Renderbuffer = opaque {
             @constCast(self)._pending_storage = .{ .internalformat = internalformat, .width = width, .height = height };
             return @constCast(self);
         }
-        /// Queues a plain storage allocation on an explicit target.
+        /// Queues a pending target plus plain single-sample storage without GL or cache mutation until apply.
+        /// Same RBO-vs-texture rationale as setStorage but pins an explicit target; multisample still wins if also queued.
         /// Parameters:
         /// - self: editor instance.
         /// - target: renderbuffer target for the storage.
-        /// - internalformat: sized internal format.
+        /// - internalformat: sized internal format enum.
         /// - width: width in pixels.
         /// - height: height in pixels.
         ///
@@ -350,13 +383,12 @@ pub const Renderbuffer = opaque {
             _ = self.setTarget(target);
             return self.setStorage(internalformat, width, height);
         }
-        /// Queues a multisampled storage allocation via
-        /// `glRenderbufferStorageMultisample`. `samples` must not exceed
-        /// `GL_MAX_SAMPLES` (see `maxSamples`).
+        /// Queues multisample storage (glRenderbufferStorageMultisample semantics) without GL or cache mutation until apply.
+        /// Use for an MSAA render target on the fast non-samplable RBO path; resolve via Framebuffer.blitFrom; wins over plain storage if both queued.
         /// Parameters:
         /// - self: editor instance.
-        /// - samples: sample count (e.g. 4 for MSAA x4).
-        /// - internalformat: sized internal format.
+        /// - samples: sample count (0=single-sample fallback, e.g. 4=MSAAx4, must be <= GL_MAX_SAMPLES from maxSamples()).
+        /// - internalformat: sized internal format enum.
         /// - width: width in pixels.
         /// - height: height in pixels.
         ///
@@ -365,12 +397,13 @@ pub const Renderbuffer = opaque {
             @constCast(self)._pending_storage_multisample = .{ .samples = samples, .internalformat = internalformat, .width = width, .height = height };
             return @constCast(self);
         }
-        /// Queues a multisampled storage allocation on an explicit target.
+        /// Queues a pending target plus multisample storage without GL or cache mutation until apply.
+        /// Same MSAA RBO rationale as setStorageMultisample but on an explicit target; resolve via Framebuffer.blitFrom; wins over plain storage.
         /// Parameters:
         /// - self: editor instance.
         /// - target: renderbuffer target for the storage.
-        /// - samples: sample count (e.g. 4 for MSAA x4).
-        /// - internalformat: sized internal format.
+        /// - samples: sample count (0=single-sample fallback, e.g. 4=MSAAx4, must be <= GL_MAX_SAMPLES from maxSamples()).
+        /// - internalformat: sized internal format enum.
         /// - width: width in pixels.
         /// - height: height in pixels.
         ///
@@ -379,7 +412,8 @@ pub const Renderbuffer = opaque {
             _ = self.setTarget(target);
             return self.setStorageMultisample(samples, internalformat, width, height);
         }
-        /// Applies all queued changes to the renderbuffer.
+        /// Binds GL target and allocates storage via glRenderbufferStorage/Multisample then syncs cached Impl and clears pending.
+        /// Multisample pending wins if both queued; plain path resets cached samples to 0 (single-sample); resolve MSAA via Framebuffer.blitFrom.
         /// Parameters:
         /// - self: editor instance.
         ///
